@@ -34,10 +34,19 @@ def _sensor_bits() -> list[int]:
     ]
 
 
+def _sensor_name(bit: int) -> str:
+    # Most entries are MAV_SYS_STATUS_SENSOR_*, but newer ones are MAV_SYS_STATUS_* only.
+    name = enum_name("MAV_SYS_STATUS_SENSOR", bit, strip_prefix=False)
+    for prefix in ("MAV_SYS_STATUS_SENSOR_", "MAV_SYS_STATUS_"):
+        if name.startswith(prefix):
+            return name[len(prefix) :]
+    return name
+
+
 def _sensors(sys_status: mavlink.MAVLink_sys_status_message) -> list[SensorHealth]:
     return [
         SensorHealth(
-            sensor=enum_name("MAV_SYS_STATUS_SENSOR", bit),
+            sensor=_sensor_name(bit),
             enabled=bool(sys_status.onboard_control_sensors_enabled & bit),
             healthy=bool(sys_status.onboard_control_sensors_health & bit),
         )

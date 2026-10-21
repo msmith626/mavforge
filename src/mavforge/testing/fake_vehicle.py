@@ -27,7 +27,7 @@ ParamSpec = tuple[float, ParamType]
 def default_copter_params() -> dict[str, ParamSpec]:
     return {
         "FORMAT_VERSION": (120, ParamType.INT16),
-        "SYSID_THISMAV": (1, ParamType.INT16),
+        "MAV_SYSID": (1, ParamType.INT16),  # SYSID_THISMAV before ArduPilot 4.7
         "FRAME_CLASS": (1, ParamType.INT8),
         "FRAME_TYPE": (1, ParamType.INT8),
         "ARMING_SKIPCHK": (0, ParamType.INT32),
