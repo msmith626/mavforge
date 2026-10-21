@@ -53,13 +53,15 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "PT", "N", "S", "TID"]
-ignore = ["S101"]  # asserts are fine in tests; src code avoids them by convention
+ignore = ["S101"]  # asserts narrow untyped pymavlink messages after isinstance-filtered waits
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S"]
 
 [tool.pyright]
 include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 # pymavlink ships no py.typed marker; treat it as untyped and wrap it at the transport boundary.
