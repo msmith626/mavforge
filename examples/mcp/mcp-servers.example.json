@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "mavforge": {
+      "command": "uv",
+      "args": [
+        "--directory", "/ABSOLUTE/PATH/TO/mavforge",
+        "run", "mavforge-mcp",
+        "--connection", "tcp:127.0.0.1:5760"
+      ]
+    }
+  }
+}
