@@ -78,9 +78,9 @@ Global options go before the command. You can also put the connection in
 import mavforge
 
 with mavforge.connect("tcp:127.0.0.1:5760", timeout=30) as vehicle:
-    print(vehicle.identity.firmware)          # e.g. 4.7.2
+    print(vehicle.identity.firmware)  # e.g. 4.7.2
     result = vehicle.params.list("INS_*")
-    if result.status != "succeeded":          # partial downloads are reported, not hidden
+    if result.status != "succeeded":  # partial downloads are reported, not hidden
         print("missing:", result.missing_indices)
     for p in result.params:
         print(p.name, p.value, p.type)
