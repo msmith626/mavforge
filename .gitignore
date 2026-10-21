@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.coverage
+htmlcov/
+# local MAVForge state (audit logs, backups, MCP client configs with machine paths)
+.mavforge/
+*.local.json
+mav.parm
+mav.tlog*
