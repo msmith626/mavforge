@@ -44,6 +44,19 @@ class Transport(Protocol):
     def receive_errors(self) -> int: ...
 
 
+def open_failure_hint(spec: ConnectionSpec, exc: Exception) -> str:
+    """A short remedy for common link-opening failures, or an empty string."""
+    text = str(exc)
+    if spec.is_serial and "Permission denied" in text:
+        return (
+            ". On Linux, add your user to the group that owns the device "
+            "(usually 'dialout': sudo usermod -aG dialout $USER), then log in again"
+        )
+    if spec.is_serial and ("No such file" in text or "could not open port" in text):
+        return ". Check the device path and that the flight controller is plugged in"
+    return ""
+
+
 class PymavlinkTransport:
     """``Transport`` over ``mavutil.mavlink_connection``. Not thread-safe by itself."""
 
@@ -58,7 +71,8 @@ class PymavlinkTransport:
             )
         except Exception as exc:  # pymavlink raises a variety of OSError/SerialException types
             raise ConnectionFailedError(
-                f"Could not open {spec}: {exc}", details={"connection": str(spec)}
+                f"Could not open {spec}: {exc}{open_failure_hint(spec, exc)}",
+                details={"connection": str(spec)},
             ) from exc
         self._errors = 0
 

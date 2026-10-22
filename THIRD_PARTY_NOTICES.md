@@ -7,6 +7,7 @@ MAVForge is licensed under GPL-3.0-or-later.
 | Package | License | Notes |
 |---|---|---|
 | pymavlink | LGPL-3.0 (generated MAVLink code: MIT, per its COPYING) | Imported, not modified |
+| pyserial | BSD-3-Clause | Serial links (pymavlink imports it but does not declare it) |
 | mcp, mcp-types | MIT | Model Context Protocol SDK |
 | pydantic | MIT | |
 | typer | MIT | |
