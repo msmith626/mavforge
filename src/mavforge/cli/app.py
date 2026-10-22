@@ -12,6 +12,7 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any, NoReturn
 
 import typer
@@ -23,14 +24,19 @@ from rich.text import Text
 import mavforge
 from mavforge.domain.errors import ExitCode, MAVForgeError
 from mavforge.domain.models import (
+    BackupListResult,
+    BackupResult,
     CapabilitiesResult,
     InfoResult,
+    ParamDiffResult,
     ParamGetResult,
     ParamListResult,
+    ParamPresence,
     ParamValue,
     StatusReport,
 )
 from mavforge.domain.outcomes import OperationStatus, exit_code_for
+from mavforge.domain.values import format_value
 from mavforge.transport.connection import DEFAULT_SOURCE_COMPONENT, DEFAULT_SOURCE_SYSTEM
 
 EXIT_CODES_HELP = (
@@ -48,7 +54,10 @@ app = typer.Typer(
     rich_markup_mode=None,
     pretty_exceptions_enable=False,
 )
-params_app = typer.Typer(help="Inspect vehicle parameters (read-only).", no_args_is_help=True)
+params_app = typer.Typer(
+    help="Inspect, back up and compare vehicle parameters (read-only on the vehicle).",
+    no_args_is_help=True,
+)
 app.add_typer(params_app, name="params")
 
 out = Console(highlight=False, soft_wrap=True)
@@ -155,6 +164,18 @@ def _with_vehicle[R: BaseModel](
     _emit(opts, result, render)
 
 
+def _offline[R: BaseModel](
+    ctx: typer.Context, action: Callable[[], R], render: Callable[[R], None]
+) -> NoReturn:
+    """Run an operation that needs no vehicle connection."""
+    opts: GlobalOptions = ctx.obj
+    try:
+        result = action()
+    except MAVForgeError as exc:
+        _fail(opts, exc)
+    _emit(opts, result, render)
+
+
 # -- renderers ----------------------------------------------------------------------
 
 
@@ -252,8 +273,7 @@ def render_status(r: StatusReport) -> None:
 
 
 def _format_value(p: ParamValue) -> str:
-    text = f"{p.value:g}" if isinstance(p.value, float) else str(p.value)
-    return text + (" (~rounded)" if p.precision_limited else "")
+    return format_value(p.value) + (" (~rounded)" if p.precision_limited else "")
 
 
 def render_param_list(r: ParamListResult) -> None:
@@ -275,6 +295,80 @@ def render_param_list(r: ParamListResult) -> None:
 
 def render_param_get(r: ParamGetResult) -> None:
     out.print(Text(f"{r.param.name} = {_format_value(r.param)}  ({r.param.type.value})"))
+
+
+def render_backup(r: BackupResult) -> None:
+    out.print(Text(f"Saved {r.param_count} parameters to {r.path}"))
+    if r.param_file:
+        out.print(Text(f"Exported .param file: {r.param_file}"))
+    out.print(Text(f"Backup id: {r.backup_id}"))
+    if not r.complete:
+        err.print(
+            Text("warning: backup is INCOMPLETE; some parameters never arrived", style="yellow")
+        )
+    _status_line(r.status)
+
+
+def render_backups(r: BackupListResult) -> None:
+    if not r.backups:
+        out.print(f"No backups in {r.directory}")
+    else:
+        table = Table(box=None, pad_edge=False)
+        table.add_column("Backup id", style="bold")
+        table.add_column("Created (UTC)")
+        table.add_column("Vehicle")
+        table.add_column("Params", justify="right")
+        for b in r.backups:
+            count = str(b.param_count) + ("" if b.complete else " (incomplete)")
+            table.add_row(b.backup_id, f"{b.created_at:%Y-%m-%d %H:%M:%S}", b.vehicle, count)
+        out.print(table)
+    for name in r.unreadable:
+        err.print(Text(f"warning: {name} is not a valid backup", style="yellow"))
+
+
+def _names(title: str, items: list[ParamPresence], limit: int = 20) -> None:
+    if not items:
+        return
+    shown = ", ".join(f"{p.name}={format_value(p.value)}" for p in items[:limit])
+    more = f", ... and {len(items) - limit} more (use --json)" if len(items) > limit else ""
+    out.print(Text(f"{title} ({len(items)}): ", style="bold").append(safe(shown + more)))
+
+
+def make_render_diff(include_volatile: bool) -> Callable[[ParamDiffResult], None]:
+    def render(r: ParamDiffResult) -> None:
+        out.print(Text(f"Baseline: {r.reference}   Compared: {r.current}", style="bold"))
+        for warning in r.warnings:
+            err.print(Text(f"warning: {warning}", style="yellow"))
+        changed = [c for c in r.changed if include_volatile or not c.volatile]
+        hidden = len(r.changed) - len(changed)
+        if changed:
+            table = Table(box=None, pad_edge=False)
+            table.add_column("Changed", style="bold")
+            table.add_column("Baseline", justify="right")
+            table.add_column("Now", justify="right")
+            table.add_column("")
+            for c in changed:
+                note = "volatile" if c.volatile else ""
+                table.add_row(
+                    safe(c.name), format_value(c.reference), format_value(c.current), note
+                )
+            out.print(table)
+        else:
+            out.print("No configuration differences in shared parameters.")
+        if hidden:
+            out.print(
+                Text(
+                    f"{hidden} volatile change(s) hidden (counters, boot-time "
+                    "calibration); use --all to show them.",
+                    style="dim",
+                )
+            )
+        _names("Only in baseline", r.only_in_reference)
+        _names("Only in compared", r.only_in_current)
+        out.print(f"Unchanged: {r.unchanged}")
+        _status_line(r.status)
+
+    return render
 
 
 def render_capabilities(r: CapabilitiesResult) -> None:
@@ -335,6 +429,53 @@ def params_get(
 ) -> None:
     """Read one parameter by name."""
     _with_vehicle(ctx, lambda v: v.params.get(name), render_param_get)
+
+
+@params_app.command("backup")
+def params_backup(
+    ctx: typer.Context,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output", "-o", help="JSON backup path (default: MAVForge backup directory)."
+        ),
+    ] = None,
+    param_file: Annotated[
+        Path | None,
+        typer.Option("--param-file", help="Also export a plain .param file (NAME VALUE)."),
+    ] = None,
+) -> None:
+    """Save all parameters, with vehicle identity and firmware, to a new backup file."""
+    _with_vehicle(ctx, lambda v: v.params.backup(output, param_file=param_file), render_backup)
+
+
+@params_app.command("backups")
+def params_backups(ctx: typer.Context) -> None:
+    """List backups in the MAVForge backup directory (no vehicle needed)."""
+    _offline(ctx, mavforge.list_backups, render_backups)
+
+
+@params_app.command("diff")
+def params_diff(
+    ctx: typer.Context,
+    baseline: Annotated[
+        str, typer.Argument(help="Backup id, MAVForge JSON backup, or .param file.")
+    ],
+    against: Annotated[
+        str | None,
+        typer.Option(
+            "--against", help="Compare with this backup/file instead of the live vehicle."
+        ),
+    ] = None,
+    include_volatile: Annotated[
+        bool, typer.Option("--all", "-a", help="Also show volatile parameter changes.")
+    ] = False,
+) -> None:
+    """Compare the vehicle (or another backup) with a baseline backup or .param file."""
+    render = make_render_diff(include_volatile)
+    if against is not None:
+        _offline(ctx, lambda: mavforge.diff_backups(baseline, against), render)
+    _with_vehicle(ctx, lambda v: v.params.diff(baseline), render)
 
 
 def main() -> None:

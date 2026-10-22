@@ -18,6 +18,7 @@ from mavforge.domain.errors import (
     ProtocolError,
 )
 from mavforge.domain.models import FLOAT_EXACT_INT_LIMIT, ParamType, ParamValue
+from mavforge.domain.values import normalize
 from mavforge.transport.connection import MavlinkConnection
 from mavforge.transport.dialect import Message, enum_name, mavlink
 
@@ -34,11 +35,10 @@ def decode_param_value(msg: mavlink.MAVLink_param_value_message) -> ParamValue:
             f"Parameter {name!r} has unknown MAV_PARAM_TYPE {msg.param_type}"
         ) from None
     raw = float(msg.param_value)
-    value: float | int = round(raw) if ptype.is_integer else raw
     index = msg.param_index if 0 <= msg.param_index < UNSOLICITED_INDEX else None
     return ParamValue(
         name=name,
-        value=value,
+        value=normalize(raw, ptype),
         type=ptype,
         index=index,
         precision_limited=ptype.is_integer and abs(raw) > FLOAT_EXACT_INT_LIMIT,

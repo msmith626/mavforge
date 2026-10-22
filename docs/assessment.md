@@ -18,7 +18,7 @@ Cells for other tools come from reading their source and documentation
 | Typed Python API | yes | no (module API) | no (C#) | internal only | no |
 | Machine-readable output and exit codes | yes | no | no | no | JSON over MCP |
 | Parameter writes verified by value read-back | planned | name echo only (pymavlink `mavset`) | name echo only | not assessed | not assessed |
-| Backups bound to vehicle and firmware identity | planned | no | no | not assessed | no |
+| Backups bound to vehicle and firmware identity | yes | no | no | not assessed | no |
 | Plan → approve → apply, with audit log | planned (audit log done) | no | no | records a reason per change | `confirm` flags |
 | Calibration as deterministic state machines with evidence | planned | relays prompts | UI-driven | no | no |
 | AI agent access under a shared policy | yes (read-only so far) | no | no | no | yes, but flight-oriented |
@@ -56,7 +56,7 @@ station.
   - Opt-in hardware smoke tests, passed on one ArduPlane 4.6.2 flight controller over USB.
 
 **Not done** (see [roadmap.md](roadmap.md)):
-- Parameter writes, backup, diff and restore.
+- Parameter writes and restore (backup and diff are done: milestone M2a).
 - MAVFTP parameter download.
 - Parameter metadata.
 - Diagnostics.

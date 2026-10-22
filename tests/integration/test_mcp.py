@@ -14,7 +14,17 @@ from mavforge.policy.permissions import Policy
 from mavforge.services.session import ConnectOptions
 from mavforge.testing.fake_vehicle import FakeFactory, FakeVehicle
 
-TOOLS = {"mavforge_capabilities", "vehicle_info", "vehicle_status", "params_list", "params_get"}
+TOOLS = {
+    "mavforge_capabilities",
+    "vehicle_info",
+    "vehicle_status",
+    "params_list",
+    "params_get",
+    "params_backup",
+    "params_backups",
+    "params_diff",
+}
+CREATES_FILES = {"params_backup"}
 
 
 def _server(connection: str | None) -> tuple[Any, VehicleProvider]:
@@ -49,7 +59,7 @@ def test_tools_are_listed_with_read_only_annotations_and_schemas() -> None:
     assert {t.name for t in tools} == TOOLS
     for tool in tools:
         assert tool.annotations is not None
-        assert tool.annotations.read_only_hint is True
+        assert tool.annotations.read_only_hint is (tool.name not in CREATES_FILES)
         assert tool.annotations.destructive_hint is False
         assert tool.output_schema is not None
         assert "status" in tool.output_schema["properties"]
@@ -124,3 +134,33 @@ def test_stdio_subprocess_end_to_end(fake: FakeVehicle) -> None:
     assert not result.is_error
     names = [p["name"] for p in result.structured_content["params"]]
     assert names == ["FRAME_CLASS", "FRAME_TYPE"]
+
+
+def test_backup_then_diff_by_id(fake: FakeVehicle) -> None:
+    server, provider = _server(fake.connection_string)
+
+    async def run() -> tuple[Any, Any, Any]:
+        async with Client(server) as client:
+            backup = await client.call_tool("params_backup", {})
+            backup_id = backup.structured_content["backup_id"]
+            listed = await client.call_tool("params_backups", {})
+            diff = await client.call_tool("params_diff", {"backup_id": backup_id})
+            return backup, listed, diff
+
+    try:
+        backup, listed, diff = anyio.run(run)
+    finally:
+        provider.close()
+    assert backup.structured_content["complete"] is True
+    assert [b["backup_id"] for b in listed.structured_content["backups"]] == [
+        backup.structured_content["backup_id"]
+    ]
+    assert diff.structured_content["changed"] == []
+
+
+@pytest.mark.parametrize("backup_id", ["../../etc/passwd", "/etc/passwd", "x/../y.json"])
+def test_agents_cannot_diff_arbitrary_paths(fake: FakeVehicle, backup_id: str) -> None:
+    result = call(fake.connection_string, "params_diff", {"backup_id": backup_id})
+    assert result.is_error
+    assert "invalid_input" in result.content[0].text
+    assert "PARAM_REQUEST_LIST" not in fake.received_types()

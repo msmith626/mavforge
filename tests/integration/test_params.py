@@ -56,3 +56,9 @@ def test_get_rejects_malformed_names_without_contacting_vehicle(fake: FakeVehicl
     with mavforge.connect(fake.connection_string) as vehicle, pytest.raises(InvalidInputError):
         vehicle.params.get("BAD;NAME")
     assert "PARAM_REQUEST_READ" not in fake.received_types()
+
+
+def test_float_values_are_reported_as_typed_not_as_float32_noise(fake: FakeVehicle) -> None:
+    with mavforge.connect(fake.connection_string) as vehicle:
+        offs = vehicle.params.get("INS_ACCOFFS_X").param
+    assert offs.value == 0.001  # not 0.0010000000474974513

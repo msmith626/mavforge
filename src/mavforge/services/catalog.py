@@ -48,13 +48,20 @@ PARAMS_LIST = OperationSpec(
 )
 PARAMS_GET = OperationSpec("params_get", "Read one parameter by name.", Permission.READ, False)
 
+PARAMS_BACKUP = OperationSpec(
+    "params_backup",
+    "Save all parameters, with vehicle identity and firmware, to a new local backup file.",
+    Permission.READ,
+    False,
+)
+PARAMS_DIFF = OperationSpec(
+    "params_diff",
+    "Compare the vehicle's parameters with a backup or .param file.",
+    Permission.READ,
+    False,
+)
+
 _PLANNED = [
-    OperationSpec(
-        "params_backup", "Save parameters with vehicle identity.", Permission.READ, False, False
-    ),
-    OperationSpec(
-        "params_diff", "Compare parameters with a backup.", Permission.READ, False, False
-    ),
     OperationSpec("diagnose", "Classified diagnostic findings.", Permission.READ, False, False),
     OperationSpec(
         "params_change",
@@ -68,7 +75,15 @@ _PLANNED = [
     ),
 ]
 
-CATALOG: list[OperationSpec] = [INFO, STATUS, PARAMS_LIST, PARAMS_GET, *_PLANNED]
+CATALOG: list[OperationSpec] = [
+    INFO,
+    STATUS,
+    PARAMS_LIST,
+    PARAMS_GET,
+    PARAMS_BACKUP,
+    PARAMS_DIFF,
+    *_PLANNED,
+]
 
 
 def run_operation[T](

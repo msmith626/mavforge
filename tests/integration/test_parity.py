@@ -150,3 +150,24 @@ def test_policy_is_enforced_below_the_interfaces(fake: FakeVehicle) -> None:
         provider.close()
     assert result.is_error
     assert "not_permitted" in result.content[0].text
+
+
+def test_backup_and_diff_parity(fake: FakeVehicle, isolated_state_dir: Path) -> None:
+    """Backups made through each interface hold the same data; diffs agree."""
+    api = via_api(fake, lambda v: v.params.backup())
+    cli = via_cli(fake, "params", "backup")
+    mcp = via_mcp(fake, "params_backup", {})
+    ids = [api["backup_id"], cli["backup_id"], mcp["backup_id"]]
+    assert len(set(ids)) == 3  # same-second default names get -2, -3 suffixes
+    contents = [json.loads(Path(r["path"]).read_text()) for r in (api, cli, mcp)]
+    for content in contents:
+        content.pop("created_at")
+    assert contents[0] == contents[1] == contents[2]
+
+    diffs = [
+        _strip(via_api(fake, lambda v: v.params.diff(ids[0]))),
+        _strip(via_cli(fake, "params", "diff", ids[0])),
+        _strip(via_mcp(fake, "params_diff", {"backup_id": ids[0]})),
+    ]
+    assert diffs[0] == diffs[1] == diffs[2]
+    assert diffs[0]["changed"] == []

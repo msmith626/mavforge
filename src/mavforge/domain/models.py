@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -232,3 +232,101 @@ class CapabilitiesResult(_Model):
     operations: list[OperationInfo]
     platforms: list[str] = Field(description="Platform adapters with specific support.")
     granted_permissions: list[str]
+
+
+BACKUP_FORMAT = "mavforge.param-backup"
+BACKUP_SCHEMA_VERSION = 1
+
+
+class BackupParam(_Model):
+    name: str
+    value: float | int
+    type: ParamType | None = Field(
+        default=None, description="MAV_PARAM_TYPE; None when imported from a plain .param file."
+    )
+    precision_limited: bool = False
+
+
+class ParamBackup(_Model):
+    """A parameter snapshot bound to the vehicle and firmware it was taken from."""
+
+    format: Literal["mavforge.param-backup"] = BACKUP_FORMAT
+    schema_version: Literal[1] = BACKUP_SCHEMA_VERSION
+    created_at: datetime
+    mavforge_version: str
+    vehicle: VehicleIdentity | None = Field(
+        description="Identity at backup time; None for an imported plain .param file."
+    )
+    source: str = Field(description="Where the values came from (redacted connection or file).")
+    complete: bool = Field(description="False if some parameters never arrived.")
+    total_on_vehicle: int | None = None
+    missing_indices: list[int] = Field(default_factory=list)
+    params: list[BackupParam]
+
+
+class BackupResult(_Model):
+    status: OperationStatus
+    vehicle: VehicleIdentity
+    backup_id: str = Field(description="File name; pass it to params_diff.")
+    path: str
+    param_file: str | None = Field(default=None, description="Optional .param export path.")
+    param_count: int
+    complete: bool
+
+
+class BackupInfo(_Model):
+    backup_id: str
+    path: str
+    created_at: datetime
+    system_id: int | None
+    vehicle: str = Field(description="Autopilot, type and firmware summary.")
+    param_count: int
+    complete: bool
+
+
+class BackupListResult(_Model):
+    status: OperationStatus
+    directory: str
+    backups: list[BackupInfo]
+    unreadable: list[str] = Field(
+        default_factory=list, description="Files in the directory that are not valid backups."
+    )
+
+
+class ParamChange(_Model):
+    name: str
+    reference: float | int
+    current: float | int
+    type: ParamType | None
+    volatile: bool = Field(
+        description="Changes on its own (boot counters, boot-time gyro/baro calibration); "
+        "usually not a configuration difference."
+    )
+
+
+class ParamPresence(_Model):
+    name: str
+    value: float | int
+    volatile: bool
+
+
+class ParamDiffResult(_Model):
+    status: OperationStatus
+    reference: str = Field(description="The baseline: backup id, file, or description.")
+    current: str = Field(description="What was compared: 'vehicle' or a backup.")
+    vehicle: VehicleIdentity | None = Field(
+        default=None, description="Live vehicle identity when comparing against a vehicle."
+    )
+    changed: list[ParamChange]
+    only_in_reference: list[ParamPresence] = Field(
+        description="In the baseline but absent now (renamed in newer firmware, or "
+        "belongs to a disabled feature)."
+    )
+    only_in_current: list[ParamPresence] = Field(
+        description="Present now but absent from the baseline (new firmware or feature)."
+    )
+    unchanged: int
+    warnings: list[str] = Field(
+        description="Identity, firmware or completeness problems that limit what the "
+        "diff means. Read these before trusting the result."
+    )

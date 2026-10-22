@@ -42,6 +42,11 @@ class PlatformAdapter(ABC):
     @abstractmethod
     def mode_name(self, heartbeat: mavlink.MAVLink_heartbeat_message) -> str | None: ...
 
+    def is_volatile_param(self, name: str) -> bool:
+        """True for parameters the firmware changes on its own (counters, boot-time
+        calibration), which a diff should flag rather than treat as configuration."""
+        return False
+
     def normalize_param_name(self, name: str) -> str:
         name = name.strip()
         if not _PARAM_NAME_RE.match(name):

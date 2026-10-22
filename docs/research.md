@@ -52,6 +52,17 @@ Sources: https://mavlink.io/en/services/parameter.html, ArduPilot `libraries/GCS
 - **Parameter names change between firmware versions.** In 4.7, `SYSID_THISMAV` became `MAV_SYSID` and `SYSID_MYGCS` became `MAV_GCS_SYSID` [verified]. `ARMING_CHECK` was replaced by the inverted `ARMING_SKIPCHK` [source]. Any parameter metadata, diff or restore must therefore be keyed by firmware version.
 - **Metadata** is published at `https://autotest.ardupilot.org/Parameters/<Vehicle>/apm.pdef.{xml,json}`, with versioned sets at `/Parameters/versioned/<Vehicle>/stable-X.Y.Z/`. It is generated from GPLv3 source, and I found no separate license statement [unverified].
 
+## Parameters that change on their own ("volatile")
+
+A diff between two reads of an unchanged vehicle should show nothing. Some ArduPilot parameters are rewritten by the firmware itself, so MAVForge flags them as `volatile`. It doesn't hide them.
+
+- **ArduPilot metadata.** `apm.pdef.xml` (Copter stable-4.7.1, Plane stable-4.6.2) marks only these as `Volatile`: `BARO1..3_GND_PRESS`, `BARO_GND_TEMP` and `BARO_FIELD_ELV`, plus `TCAL_BARO_EXP`, `TCAL_TEMP_MAX` and `TCAL_TEMP_MIN` on Copter. No Plane/Copter `stable-4.7.2` metadata directory was published yet, and the versioned directories carry only XML. [verified]
+- **SITL observation.** I read all parameters of ArduCopter 4.7.2 SITL after three successive reboots without wiping EEPROM, waiting 20 s after each boot. [verified]
+  - First → second boot: `STAT_BOOTCNT`, `BARO2_GND_PRESS`, `INS_GYROFFS_{X,Y,Z}`, `INS_GYR2OFFS_{X,Y,Z}` and `INS_GYR2_CALTEMP` changed. The gyro offsets are re-measured at boot when `INS_GYR_CAL=1`.
+  - Second → third boot: only `STAT_BOOTCNT` changed.
+- **Flagged set.** The ArduPilot adapter flags the metadata set above, plus `STAT_BOOTCNT`, `STAT_RUNTIME`, `STAT_FLTTIME`, `INS_GYR*OFFS_*` and `INS_GYR*_CALTEMP`.
+- **Not flagged.** Accelerometer and compass calibration values are deliberately *not* flagged: a change there is real.
+
 ## Identification
 
 - **HEARTBEAT selection.** Mission Planner ignores GCS-type senders and prefers component 1. MAVForge does the same, and also reports any other autopilot system IDs it hears. [verified with the fake vehicle]
@@ -154,3 +165,4 @@ Sources: https://modelcontextprotocol.io/specification/2026-07-28, https://githu
 - **Pre-arm bit with checks disabled.** With `ARMING_CHECK=0`, ArduPlane marks the `PREARM_CHECK` bit as *present* but *not enabled*. MAVForge now reports this as `prearm_checks_enabled: false` and shows "DISABLED on vehicle", where it previously said "not reported".
 - **GPS without a fix.** With `NO_FIX` the receiver reported `eph` = 9999 (HDOP 99.99), which is a placeholder. MAVForge reports HDOP only when there is a 2D or 3D fix.
 - **Bench state.** The board was on the bench with no RC receiver and no flight battery. It showed mode RTL with MAV_STATE CRITICAL and `RC_RECEIVER` unhealthy, which is consistent with a radio failsafe; the cause was not confirmed. The battery read about 0.14 V.
+- **Backup and diff.** I backed up all 1117 parameters, then diffed the live plane against that backup a few seconds later. The only change was `STAT_RUNTIME`, which was correctly flagged as volatile. The exported `.param` file round-trips all 1117 values exactly.

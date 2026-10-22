@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fnmatch import fnmatchcase
+
 from mavforge.platforms.base import Capability, PlatformAdapter
 from mavforge.transport.dialect import mavlink, mavutil
 
@@ -32,6 +34,25 @@ _FAMILIES: dict[int, str] = {
 }
 
 
+_VOLATILE_PATTERNS = (
+    # Marked Volatile in ArduPilot's apm.pdef.xml (Copter 4.7.1, Plane 4.6.2):
+    "BARO?_GND_PRESS",
+    "BARO_GND_TEMP",
+    "BARO_FIELD_ELV",
+    "TCAL_BARO_EXP",
+    "TCAL_TEMP_MAX",
+    "TCAL_TEMP_MIN",
+    # Observed changing across reboots of ArduCopter 4.7.2 SITL (docs/research.md):
+    # usage counters, and gyro offsets re-measured at boot when INS_GYR_CAL=1.
+    "STAT_BOOTCNT",
+    "STAT_RUNTIME",
+    "STAT_FLTTIME",
+    "INS_GYROFFS_?",
+    "INS_GYR?OFFS_?",
+    "INS_GYR*_CALTEMP",
+)
+
+
 class ArduPilotAdapter(PlatformAdapter):
     name = "ardupilot"
     capabilities = frozenset({Capability.IDENTIFY, Capability.STATUS, Capability.PARAM_READ})
@@ -52,6 +73,9 @@ class ArduPilotAdapter(PlatformAdapter):
         if not mapping:
             return None
         return mapping.get(heartbeat.custom_mode, f"MODE_{heartbeat.custom_mode}")
+
+    def is_volatile_param(self, name: str) -> bool:
+        return any(fnmatchcase(name, pattern) for pattern in _VOLATILE_PATTERNS)
 
     def normalize_param_name(self, name: str) -> str:
         # ArduPilot parameter names are upper case by convention.

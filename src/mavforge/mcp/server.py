@@ -18,6 +18,7 @@ import os
 import sys
 import threading
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -26,13 +27,17 @@ from mcp_types import ToolAnnotations
 import mavforge
 from mavforge.domain.errors import ConnectionFailedError, InvalidInputError, MAVForgeError
 from mavforge.domain.models import (
+    BackupListResult,
+    BackupResult,
     CapabilitiesResult,
     InfoResult,
+    ParamDiffResult,
     ParamGetResult,
     ParamListResult,
     StatusReport,
 )
 from mavforge.policy.permissions import Policy
+from mavforge.services.backup import resolve_backup_id
 from mavforge.services.info import mavforge_version
 from mavforge.services.session import ConnectOptions
 from mavforge.transport.connstr import parse_connection_string
@@ -56,6 +61,10 @@ Rules for agents:
 READ_ONLY = ToolAnnotations(
     read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False
 )
+CREATES_LOCAL_FILE = ToolAnnotations(
+    read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False
+)
+"""Reads the vehicle but writes a new file on the MAVForge host (never overwrites)."""
 
 
 class VehicleProvider:
@@ -111,6 +120,13 @@ def _call[R](provider: VehicleProvider, action: Callable[[mavforge.Vehicle], R])
         raise ToolError(json.dumps(exc.to_dict())) from exc
 
 
+def _offline[R](action: Callable[[], R]) -> R:
+    try:
+        return action()
+    except MAVForgeError as exc:
+        raise ToolError(json.dumps(exc.to_dict())) from exc
+
+
 def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
     server = MCPServer(
         name="mavforge",
@@ -159,7 +175,41 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
         parameter."""
         return _call(provider, lambda v: v.params.get(name))
 
+    @server.tool(annotations=CREATES_LOCAL_FILE)
+    def params_backup() -> BackupResult:
+        """Download every parameter and save it, together with the vehicle's identity and
+        firmware version, as a new backup file in MAVForge's backup directory on the
+        host. Does not change the vehicle; never overwrites an existing file. Returns a
+        `backup_id` to use with params_diff. Recommended before any configuration work.
+        `status` is `partial` (and `complete` false) if some parameters never arrived."""
+        return _call(provider, lambda v: v.params.backup())
+
+    @server.tool(annotations=READ_ONLY)
+    def params_backups() -> BackupListResult:
+        """List saved parameter backups (id, time, vehicle, firmware, completeness).
+        Does not contact the vehicle."""
+        return _offline(mavforge.list_backups)
+
+    @server.tool(annotations=READ_ONLY)
+    def params_diff(backup_id: str, against_backup_id: str | None = None) -> ParamDiffResult:
+        """Compare parameters with a saved backup (`backup_id` from params_backups).
+        By default compares the live vehicle; with `against_backup_id`, compares two
+        backups without contacting the vehicle. Read-only.
+        Read `warnings` first: different firmware, board or vehicle type, or incomplete
+        data limit what the diff means. Changes marked `volatile` (boot counters,
+        boot-time gyro/baro calibration) are normally not configuration differences."""
+        baseline = resolve_backup_id_safely(backup_id)
+        if against_backup_id is not None:
+            other = resolve_backup_id_safely(against_backup_id)
+            return _offline(lambda: mavforge.diff_backups(baseline, other))
+        return _call(provider, lambda v: v.params.diff(baseline))
+
     return server
+
+
+def resolve_backup_id_safely(backup_id: str) -> Path:
+    """Agents name backups by id only; arbitrary filesystem paths are refused."""
+    return _offline(lambda: resolve_backup_id(backup_id))
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:

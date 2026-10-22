@@ -80,6 +80,8 @@ class FakeVehicleConfig:
     """True: send nothing at all (models a dead link)."""
     drop_param_indices_once: set[int] = field(default_factory=set[int])
     """Indices skipped during the first PARAM_REQUEST_LIST stream (models packet loss)."""
+    withheld_param_indices: set[int] = field(default_factory=set[int])
+    """Indices never sent, even when requested individually (models a broken link)."""
     statustext_on_connect: list[str] = field(default_factory=list[str])
     sensors_unhealthy: int = 0
     prearm_passing: bool = True
@@ -231,13 +233,29 @@ class FakeVehicle:
     ) -> None:
         mav.statustext_send(severity, text.encode()[:50])
 
-    def _param_value(self, mav: mavlink.MAVLink, name: str, index: int) -> None:
-        value, ptype = self.config.params[name]
+    def set_param(self, name: str, value: float, ptype: ParamType) -> None:
+        """Change or add a parameter, as if configured by another tool. Thread-safe."""
+        with self._lock:
+            self.config.params[name] = (value, ptype)
+
+    def remove_param(self, name: str) -> None:
+        """Remove a parameter, as if a firmware change dropped it. Thread-safe."""
+        with self._lock:
+            del self.config.params[name]
+
+    def _param_snapshot(self) -> list[tuple[str, ParamSpec]]:
+        with self._lock:
+            return list(self.config.params.items())
+
+    def _param_value(
+        self, mav: mavlink.MAVLink, name: str, spec: ParamSpec, index: int, count: int
+    ) -> None:
+        value, ptype = spec
         mav.param_value_send(
             name.encode(),
             float(value),  # ArduPilot "C cast" encoding: every type travels as a float
             getattr(mavlink, f"MAV_PARAM_TYPE_{ptype.value}"),
-            len(self.config.params),
+            count,
             index,
         )
 
@@ -339,22 +357,30 @@ class FakeVehicle:
         with self._lock:
             first = self._param_list_requests == 0
             self._param_list_requests += 1
-        for index, name in enumerate(self.config.params):
+        params = self._param_snapshot()
+        for index, (name, spec) in enumerate(params):
             if first and index in self.config.drop_param_indices_once:
                 continue
-            self._param_value(mav, name, index)
+            if index in self.config.withheld_param_indices:
+                continue
+            self._param_value(mav, name, spec, index, len(params))
 
     def _handle_param_read(
         self, mav: mavlink.MAVLink, msg: mavlink.MAVLink_param_request_read_message
     ) -> None:
-        names = list(self.config.params)
+        params = self._param_snapshot()
+        names = [name for name, _ in params]
         param_id = str(msg.param_id).rstrip("\x00")
         if msg.param_index >= 0:
-            if msg.param_index < len(names):
-                self._param_value(mav, names[msg.param_index], msg.param_index)
+            if msg.param_index in self.config.withheld_param_indices:
+                return
+            if msg.param_index < len(params):
+                name, spec = params[msg.param_index]
+                self._param_value(mav, name, spec, msg.param_index, len(params))
             return
-        if param_id in self.config.params:
-            self._param_value(mav, param_id, names.index(param_id))
+        if param_id in names:
+            index = names.index(param_id)
+            self._param_value(mav, param_id, params[index][1], index, len(params))
         else:
             mav.param_error_send(
                 msg.get_srcSystem(),
