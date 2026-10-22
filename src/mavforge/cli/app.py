@@ -197,7 +197,12 @@ def render_info(result: InfoResult) -> None:
 
 
 def render_status(r: StatusReport) -> None:
-    prearm = {True: "passing", False: "FAILING", None: "not reported"}[r.prearm_checks_passing]
+    if r.prearm_checks_enabled is False:
+        prearm = Text("DISABLED on vehicle (no pre-arm checks enabled)", style="red")
+    else:
+        prearm = Text(
+            {True: "passing", False: "FAILING", None: "not reported"}[r.prearm_checks_passing]
+        )
     rows: list[tuple[str, Any]] = [
         (
             "Vehicle",
@@ -219,9 +224,8 @@ def render_status(r: StatusReport) -> None:
             )
         )
     if r.gps:
-        rows.append(
-            ("GPS", f"{r.gps.fix_type}, {r.gps.satellites_visible} sats, HDOP {r.gps.hdop}")
-        )
+        hdop = f", HDOP {r.gps.hdop}" if r.gps.hdop is not None else ""
+        rows.append(("GPS", f"{r.gps.fix_type}, {r.gps.satellites_visible} sats{hdop}"))
     out.print(_kv_table(rows))
     if r.sensors:
         table = Table(title="Sensors", title_justify="left")

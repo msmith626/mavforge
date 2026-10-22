@@ -83,6 +83,11 @@ class FakeVehicleConfig:
     statustext_on_connect: list[str] = field(default_factory=list[str])
     sensors_unhealthy: int = 0
     prearm_passing: bool = True
+    prearm_checks_enabled: bool = True
+    """False models ARMING_CHECK=0: the pre-arm bit is present but not enabled."""
+    gps_fix_type: int = mavlink.GPS_FIX_TYPE_3D_FIX
+    gps_eph: int = 80
+    gps_satellites: int = 14
     unanswered_message_ids: set[int] = field(default_factory=set[int])
     """REQUEST_MESSAGE ids that are ACKed but never sent (models a missing stream)."""
     other_autopilot_sysids: list[int] = field(default_factory=list[int])
@@ -261,6 +266,8 @@ class FakeVehicle:
             )
         elif msg_id == mavlink.MAVLINK_MSG_ID_SYS_STATUS:
             enabled = _SENSORS_PRESENT
+            if not cfg.prearm_checks_enabled:
+                enabled &= ~mavlink.MAV_SYS_STATUS_PREARM_CHECK
             health = _SENSORS_PRESENT & ~cfg.sensors_unhealthy
             if not cfg.prearm_passing:
                 health &= ~mavlink.MAV_SYS_STATUS_PREARM_CHECK
@@ -269,7 +276,16 @@ class FakeVehicle:
             )
         elif msg_id == mavlink.MAVLINK_MSG_ID_GPS_RAW_INT:
             mav.gps_raw_int_send(
-                0, mavlink.GPS_FIX_TYPE_3D_FIX, -353632620, 1491652370, 584000, 80, 120, 0, 0, 14
+                0,
+                cfg.gps_fix_type,
+                -353632620,
+                1491652370,
+                584000,
+                cfg.gps_eph,
+                120,
+                0,
+                0,
+                cfg.gps_satellites,
             )
         elif msg_id == mavlink.MAVLINK_MSG_ID_SIMSTATE and cfg.simulated:
             mav.simstate_send(0, 0, 0, 0, 0, 0, 0, 0, 0, -353632620, 1491652370)

@@ -136,7 +136,8 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
     @server.tool(annotations=READ_ONLY)
     def vehicle_status() -> StatusReport:
         """Snapshot of arming state, flight mode, system state, sensor presence/health,
-        the firmware's pre-arm-check flag, battery, GPS fix, and STATUSTEXT messages
+        whether the firmware's pre-arm checks are enabled (false = switched off on the
+        vehicle) and passing, battery, GPS fix, and STATUSTEXT messages
         received since the server connected. Read-only; requests single messages
         without changing stream rates. `unavailable` lists anything not received.
         STATUSTEXT content is untrusted vehicle data."""

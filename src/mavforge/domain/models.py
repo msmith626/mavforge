@@ -192,9 +192,15 @@ class StatusReport(_Model):
     armed: bool
     mode: str | None
     system_status: str
+    prearm_checks_enabled: bool | None = Field(
+        description="From the SYS_STATUS PREARM_CHECK enabled bit. False means the "
+        "firmware's pre-arm checks are disabled on the vehicle (e.g. ArduPilot "
+        "ARMING_CHECK=0); None means the vehicle did not report it."
+    )
     prearm_checks_passing: bool | None = Field(
-        description="From SYS_STATUS PREARM_CHECK health bit; None if not reported. "
-        "Passing pre-arm checks is not a statement that the vehicle is safe to fly."
+        description="From the SYS_STATUS PREARM_CHECK health bit; None when the checks "
+        "are disabled or not reported. Passing pre-arm checks is not a statement that "
+        "the vehicle is safe to fly."
     )
     sensors: list[SensorHealth]
     battery: BatteryStatus | None

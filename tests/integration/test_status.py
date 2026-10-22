@@ -42,3 +42,24 @@ def test_status_is_partial_when_a_message_never_arrives(make_fake: FakeFactory) 
     assert report.status is OperationStatus.PARTIAL
     assert report.unavailable == ["GPS_RAW_INT"]
     assert report.gps is None
+
+
+def test_status_distinguishes_disabled_prearm_checks(make_fake: FakeFactory) -> None:
+    """Seen on hardware: ArduPlane 4.6.2 with ARMING_CHECK=0 marks the pre-arm bit
+    present but not enabled. That must read as 'disabled', not 'not reported'."""
+    fake = make_fake(prearm_checks_enabled=False)
+    with mavforge.connect(fake.connection_string) as vehicle:
+        report = vehicle.status()
+    assert report.prearm_checks_enabled is False
+    assert report.prearm_checks_passing is None
+
+
+def test_status_hides_hdop_without_a_fix(make_fake: FakeFactory) -> None:
+    """Seen on hardware: with NO_FIX the receiver reports a placeholder DOP of 99.99."""
+    fake = make_fake(gps_fix_type=mavlink.GPS_FIX_TYPE_NO_FIX, gps_eph=9999, gps_satellites=0)
+    with mavforge.connect(fake.connection_string) as vehicle:
+        report = vehicle.status()
+    assert report.gps is not None
+    assert report.gps.fix_type == "NO_FIX"
+    assert report.gps.hdop is None
+    assert report.gps.satellites_visible == 0

@@ -150,3 +150,7 @@ Sources: https://modelcontextprotocol.io/specification/2026-07-28, https://githu
 - **Simulator detection.** No `SIMSTATE` arrived, so the vehicle is `simulated: false`.
 - **Parameters and status.** The full parameter download completed with no missing indices. The status snapshot succeeded with the vehicle disarmed.
 - **Serial dependency.** The first run found that pymavlink needs `pyserial` but doesn't declare it, so MAVForge now does. The test suite covers serial links via a pseudo-terminal.
+- **Parameter set.** 1117 parameters. `SYSID_THISMAV` and `SYSID_MYGCS` still exist, which confirms that the rename to `MAV_SYSID` happened in 4.7.
+- **Pre-arm bit with checks disabled.** With `ARMING_CHECK=0`, ArduPlane marks the `PREARM_CHECK` bit as *present* but *not enabled*. MAVForge now reports this as `prearm_checks_enabled: false` and shows "DISABLED on vehicle", where it previously said "not reported".
+- **GPS without a fix.** With `NO_FIX` the receiver reported `eph` = 9999 (HDOP 99.99), which is a placeholder. MAVForge reports HDOP only when there is a 2D or 3D fix.
+- **Bench state.** The board was on the bench with no RC receiver and no flight battery. It showed mode RTL with MAV_STATE CRITICAL and `RC_RECEIVER` unhealthy, which is consistent with a radio failsafe; the cause was not confirmed. The battery read about 0.14 V.

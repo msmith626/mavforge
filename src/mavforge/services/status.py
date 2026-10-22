@@ -55,13 +55,14 @@ def _sensors(sys_status: mavlink.MAVLink_sys_status_message) -> list[SensorHealt
     ]
 
 
-def _prearm(sys_status: mavlink.MAVLink_sys_status_message) -> bool | None:
+def _prearm(sys_status: mavlink.MAVLink_sys_status_message) -> tuple[bool | None, bool | None]:
+    """(checks enabled, checks passing) from the PREARM_CHECK bit."""
     bit = mavlink.MAV_SYS_STATUS_PREARM_CHECK
     if not sys_status.onboard_control_sensors_present & bit:
-        return None
+        return None, None
     if not sys_status.onboard_control_sensors_enabled & bit:
-        return None
-    return bool(sys_status.onboard_control_sensors_health & bit)
+        return False, None
+    return True, bool(sys_status.onboard_control_sensors_health & bit)
 
 
 def _battery(sys_status: mavlink.MAVLink_sys_status_message) -> BatteryStatus:
@@ -78,10 +79,12 @@ def _battery(sys_status: mavlink.MAVLink_sys_status_message) -> BatteryStatus:
 
 
 def _gps(gps: mavlink.MAVLink_gps_raw_int_message) -> GpsStatus:
+    # Without a position fix receivers report placeholder DOPs (e.g. 99.99), not HDOP.
+    has_fix = gps.fix_type >= mavlink.GPS_FIX_TYPE_2D_FIX
     return GpsStatus(
         fix_type=enum_name("GPS_FIX_TYPE", gps.fix_type),
         satellites_visible=None if gps.satellites_visible == 255 else gps.satellites_visible,
-        hdop=None if gps.eph == _UINT16_UNKNOWN else round(gps.eph / 100, 2),
+        hdop=round(gps.eph / 100, 2) if has_fix and gps.eph != _UINT16_UNKNOWN else None,
     )
 
 
@@ -124,13 +127,15 @@ def snapshot(session: Session) -> StatusReport:
             name for name, msg in (("SYS_STATUS", sys_status), ("GPS_RAW_INT", gps)) if msg is None
         ]
         have_sys = isinstance(sys_status, mavlink.MAVLink_sys_status_message)
+        prearm_enabled, prearm_passing = _prearm(sys_status) if have_sys else (None, None)  # type: ignore[arg-type]
         return StatusReport(
             status=OperationStatus.PARTIAL if unavailable else OperationStatus.SUCCEEDED,
             vehicle=session.identity,
             armed=bool(heartbeat.base_mode & mavlink.MAV_MODE_FLAG_SAFETY_ARMED),
             mode=session.adapter.mode_name(heartbeat),
             system_status=enum_name("MAV_STATE", heartbeat.system_status),
-            prearm_checks_passing=_prearm(sys_status) if have_sys else None,  # type: ignore[arg-type]
+            prearm_checks_enabled=prearm_enabled,
+            prearm_checks_passing=prearm_passing,
             sensors=_sensors(sys_status) if have_sys else [],  # type: ignore[arg-type]
             battery=_battery(sys_status) if have_sys else None,  # type: ignore[arg-type]
             gps=_gps(gps) if isinstance(gps, mavlink.MAVLink_gps_raw_int_message) else None,
