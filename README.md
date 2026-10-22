@@ -23,14 +23,16 @@ See [docs/mavproxy.md](docs/mavproxy.md).
 
 | Operation | API | CLI | MCP tool | Verified against |
 |---|---|---|---|---|
-| Identify vehicle (autopilot, firmware, git hash, board, capabilities, SITL detection) | `vehicle.info()` | `mavforge info` | `vehicle_info` | fake vehicle, ArduCopter 4.7.2 SITL |
-| Status snapshot (armed, mode, sensors, pre-arm flag, battery, GPS, STATUSTEXT) | `vehicle.status()` | `mavforge status` | `vehicle_status` | fake vehicle, ArduCopter 4.7.2 SITL |
-| Download all parameters, glob filter, gap recovery | `vehicle.params.list()` | `mavforge params list` | `params_list` | fake vehicle, ArduCopter 4.7.2 SITL (1369 params) |
+| Identify vehicle (autopilot, firmware, git hash, board, capabilities, SITL detection) | `vehicle.info()` | `mavforge info` | `vehicle_info` | fake vehicle, ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
+| Status snapshot (armed, mode, sensors, pre-arm flag, battery, GPS, STATUSTEXT) | `vehicle.status()` | `mavforge status` | `vehicle_status` | fake vehicle, ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
+| Download all parameters, glob filter, gap recovery | `vehicle.params.list()` | `mavforge params list` | `params_list` | fake vehicle, ArduCopter 4.7.2 SITL (1369 params), ArduPlane 4.6.2 hardware |
 | Read one parameter | `vehicle.params.get()` | `mavforge params get` | `params_get` | fake vehicle, ArduCopter 4.7.2 SITL |
 | List operations and permissions | `mavforge.capabilities()` | `mavforge capabilities` | `mavforge_capabilities` | unit tests |
 
-Real-hardware testing is opt-in ([tests/hardware](tests/hardware)) and has not yet been
-reported for any board. Only ArduPilot has a platform adapter. Other autopilots get a
+Hardware evidence so far is one board: ArduPlane 4.6.2 on a USB-connected flight controller
+(2026-10-21). The read-only identify, status and full parameter download tests passed via the
+Python API ([tests/hardware](tests/hardware)). The CLI and MCP were not run against hardware;
+they share the API code path. Only ArduPilot has a platform adapter. Other autopilots get a
 generic read-only adapter that has not been tested.
 
 ## Install (development)

@@ -53,7 +53,7 @@ station.
   - 86 default tests: unit tests, plus integration tests against a MAVLink-speaking
     fake vehicle (including parity tests).
   - 7 SITL tests against ArduCopter 4.7.2.
-  - Opt-in hardware smoke tests.
+  - Opt-in hardware smoke tests, passed on one ArduPlane 4.6.2 flight controller over USB.
 
 **Not done** (see [roadmap.md](roadmap.md)):
 - Parameter writes, backup, diff and restore.
@@ -64,7 +64,7 @@ station.
 - Approval flow.
 - Reconnect-aware long operations.
 - HTTP MCP transport.
-- Tests on real hardware.
+- Hardware coverage beyond one board (ArduPlane 4.6.2, read-only, Python API).
 - Any non-ArduPilot platform adapter.
 
 ## Minimum viable end-to-end use case (M1)

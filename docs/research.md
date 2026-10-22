@@ -56,7 +56,7 @@ Sources: https://mavlink.io/en/services/parameter.html, ArduPilot `libraries/GCS
 
 - **HEARTBEAT selection.** Mission Planner ignores GCS-type senders and prefers component 1. MAVForge does the same, and also reports any other autopilot system IDs it hears. [verified with the fake vehicle]
 - **`AUTOPILOT_VERSION`.** `flight_sw_version` packs `major<<24 | minor<<16 | patch<<8 | type`, where type is 0 dev / 64 alpha / 128 beta / 192 rc / 255 official. `flight_custom_version` carries the first 8 characters of the git hash. Against SITL: `4.7.2` and `fb773567`, which matches `git-version.txt`. [verified]
-- **SITL detection.** ArduPilot only sends `SIMSTATE` from simulator builds (`AP_SIM_ENABLED`). If a `SIMSTATE` arrives on request, MAVForge reports `simulated: true`. Otherwise it treats the vehicle as real hardware. Confirmed `true` on SITL [verified]. The `false` path is tested only with the fake vehicle so far.
+- **SITL detection.** ArduPilot only sends `SIMSTATE` from simulator builds (`AP_SIM_ENABLED`). If a `SIMSTATE` arrives on request, MAVForge reports `simulated: true`. Otherwise it treats the vehicle as real hardware. Confirmed `true` on ArduCopter 4.7.2 SITL and `false` on an ArduPlane 4.6.2 flight controller [verified].
 
 ## Pre-arm and health
 
@@ -138,3 +138,15 @@ Sources: https://modelcontextprotocol.io/specification/2026-07-28, https://githu
 - **Prebuilt binaries.** ArduPilot publishes official prebuilt SITL binaries, e.g. `https://firmware.ardupilot.org/Copter/stable-4.7.2/SITL_x86_64_linux_gnu/arducopter`. They are statically linked. [verified]
 - **SERIAL0** is a TCP server on 5760 (+10 per `-I` instance) that accepts reconnects [verified]. SITL waits for the first client before it starts booting [source].
 - **No official run image.** I found no maintained official ready-to-run Docker image, so MAVForge builds its own (`docker/sitl`). [source]
+
+## Hardware observations
+
+**ArduPlane 4.6.2, USB, 2026-10-21.** These come from `tests/hardware`, which uses the Python API and is read-only.
+
+- **Identification.** `AUTOPILOT_VERSION` decoded as 4.6.2 official, git hash `1ebd4d99`.
+  - `MAV_TYPE` is `FIXED_WING`, which the adapter maps to the `plane` family.
+  - USB VID:PID is 0x1209:0x5741, ArduPilot's shared IDs, so they do not identify the board.
+  - `board_version` 0x04520000.
+- **Simulator detection.** No `SIMSTATE` arrived, so the vehicle is `simulated: false`.
+- **Parameters and status.** The full parameter download completed with no missing indices. The status snapshot succeeded with the vehicle disarmed.
+- **Serial dependency.** The first run found that pymavlink needs `pyserial` but doesn't declare it, so MAVForge now does. The test suite covers serial links via a pseudo-terminal.
