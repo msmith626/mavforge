@@ -59,7 +59,7 @@ station.
 - Parameter writes and restore (backup and diff are done: milestone M2a).
 - MAVFTP parameter download.
 - Parameter metadata.
-- Diagnostics.
+- Diagnostics beyond the first rule set (done: milestone M3; more rules planned).
 - Calibration workflows.
 - Approval flow.
 - Reconnect-aware long operations.

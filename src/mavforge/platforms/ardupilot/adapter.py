@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from fnmatch import fnmatchcase
 
+from mavforge.platforms.ardupilot.rules import RULES
 from mavforge.platforms.base import Capability, PlatformAdapter
+from mavforge.platforms.rules import ParamRule
 from mavforge.transport.dialect import mavlink, mavutil
 
 _FAMILY_TYPES: dict[str, list[str]] = {
@@ -73,6 +76,9 @@ class ArduPilotAdapter(PlatformAdapter):
         if not mapping:
             return None
         return mapping.get(heartbeat.custom_mode, f"MODE_{heartbeat.custom_mode}")
+
+    def param_rules(self) -> Sequence[ParamRule]:
+        return RULES
 
     def is_volatile_param(self, name: str) -> bool:
         return any(fnmatchcase(name, pattern) for pattern in _VOLATILE_PATTERNS)

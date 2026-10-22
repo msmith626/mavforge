@@ -61,8 +61,15 @@ PARAMS_DIFF = OperationSpec(
     False,
 )
 
+DIAGNOSE = OperationSpec(
+    "diagnose",
+    "Classified findings (fault / warning / suspected / not checked / passed) from "
+    "vehicle-reported pre-arm failures, sensor health and configuration rules.",
+    Permission.READ,
+    False,
+)
+
 _PLANNED = [
-    OperationSpec("diagnose", "Classified diagnostic findings.", Permission.READ, False, False),
     OperationSpec(
         "params_change",
         "Plan, approve, apply and verify parameter changes.",
@@ -82,6 +89,7 @@ CATALOG: list[OperationSpec] = [
     PARAMS_GET,
     PARAMS_BACKUP,
     PARAMS_DIFF,
+    DIAGNOSE,
     *_PLANNED,
 ]
 

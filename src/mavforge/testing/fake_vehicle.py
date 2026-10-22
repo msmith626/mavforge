@@ -47,6 +47,33 @@ def default_copter_params() -> dict[str, ParamSpec]:
         "RC1_MAX": (1900, ParamType.INT16),
         "RC1_TRIM": (1500, ParamType.INT16),
         "SERIAL0_BAUD": (115, ParamType.INT32),
+        # Appended (indices above are relied on by tests): a calibrated, configured copter.
+        "INS_ACC_ID": (2753028, ParamType.INT32),
+        "INS_ACCSCAL_X": (1.001, ParamType.REAL32),
+        "INS_ACCSCAL_Y": (0.998, ParamType.REAL32),
+        "INS_ACCSCAL_Z": (1.002, ParamType.REAL32),
+        "COMPASS_DEV_ID": (97539, ParamType.INT32),
+        "COMPASS_DEV_ID2": (0, ParamType.INT32),
+        "COMPASS_DEV_ID3": (0, ParamType.INT32),
+        "COMPASS_LEARN": (0, ParamType.INT8),
+        "RCMAP_ROLL": (1, ParamType.INT8),
+        "RCMAP_PITCH": (2, ParamType.INT8),
+        "RCMAP_THROTTLE": (3, ParamType.INT8),
+        "RCMAP_YAW": (4, ParamType.INT8),
+        "RC2_MIN": (1101, ParamType.INT16),
+        "RC2_MAX": (1899, ParamType.INT16),
+        "RC2_TRIM": (1502, ParamType.INT16),
+        "RC3_MIN": (1098, ParamType.INT16),
+        "RC3_MAX": (1902, ParamType.INT16),
+        "RC3_TRIM": (1098, ParamType.INT16),
+        "RC4_MIN": (1103, ParamType.INT16),
+        "RC4_MAX": (1897, ParamType.INT16),
+        "RC4_TRIM": (1499, ParamType.INT16),
+        "FS_THR_ENABLE": (1, ParamType.INT8),
+        "BATT_FS_LOW_ACT": (2, ParamType.INT8),
+        "BATT_FS_CRT_ACT": (1, ParamType.INT8),
+        "GPS1_TYPE": (1, ParamType.INT8),
+        "LOG_BACKEND_TYPE": (1, ParamType.INT8),
     }
 
 
@@ -85,6 +112,10 @@ class FakeVehicleConfig:
     statustext_on_connect: list[str] = field(default_factory=list[str])
     sensors_unhealthy: int = 0
     prearm_passing: bool = True
+    uptime_s: float = 600.0
+    """Seconds since 'boot' reported in SYSTEM_TIME when the fake starts."""
+    prearm_failures: list[str] = field(default_factory=list[str])
+    """Reasons sent as 'PreArm: <reason>' STATUSTEXT when asked to run pre-arm checks."""
     prearm_checks_enabled: bool = True
     """False models ARMING_CHECK=0: the pre-arm bit is present but not enabled."""
     gps_fix_type: int = mavlink.GPS_FIX_TYPE_3D_FIX
@@ -112,6 +143,7 @@ class FakeVehicle:
         self._server = socket.create_server(("127.0.0.1", 0))
         self._server.settimeout(0.1)
         self.port: int = self._server.getsockname()[1]
+        self._started = time.monotonic()
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._received: list[Message] = []
@@ -305,6 +337,9 @@ class FakeVehicle:
                 0,
                 cfg.gps_satellites,
             )
+        elif msg_id == mavlink.MAVLINK_MSG_ID_SYSTEM_TIME:
+            boot_ms = int((cfg.uptime_s + time.monotonic() - self._started) * 1000)
+            mav.system_time_send(0, boot_ms & 0xFFFFFFFF)
         elif msg_id == mavlink.MAVLINK_MSG_ID_SIMSTATE and cfg.simulated:
             mav.simstate_send(0, 0, 0, 0, 0, 0, 0, 0, 0, -353632620, 1491652370)
         else:
@@ -338,6 +373,7 @@ class FakeVehicle:
                 return
             # Like ArduPilot: ACK the request, then send the message itself
             known = msg_id in (
+                mavlink.MAVLINK_MSG_ID_SYSTEM_TIME,
                 mavlink.MAVLINK_MSG_ID_AUTOPILOT_VERSION,
                 mavlink.MAVLINK_MSG_ID_SYS_STATUS,
                 mavlink.MAVLINK_MSG_ID_GPS_RAW_INT,
@@ -347,6 +383,14 @@ class FakeVehicle:
             )
             if known:
                 self._send_requested(mav, msg_id)
+        elif cmd == mavlink.MAV_CMD_RUN_PREARM_CHECKS:
+            # Like ArduPilot (GCS_Common.cpp): refused while armed, else report failures
+            if self.config.armed:
+                self._ack(mav, msg, cmd, mavlink.MAV_RESULT_TEMPORARILY_REJECTED)
+                return
+            self._ack(mav, msg, cmd, mavlink.MAV_RESULT_ACCEPTED)
+            for reason in self.config.prearm_failures:
+                self._send_statustext(mav, f"PreArm: {reason}", mavlink.MAV_SEVERITY_CRITICAL)
         elif cmd == mavlink.MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES:
             self._ack(mav, msg, cmd, mavlink.MAV_RESULT_ACCEPTED)
             self._send_requested(mav, mavlink.MAVLINK_MSG_ID_AUTOPILOT_VERSION)

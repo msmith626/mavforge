@@ -330,3 +330,52 @@ class ParamDiffResult(_Model):
         description="Identity, firmware or completeness problems that limit what the "
         "diff means. Read these before trusting the result."
     )
+
+
+class FindingKind(StrEnum):
+    FAULT = "fault"
+    """Confirmed: reported by the vehicle, or a configuration the firmware itself rejects."""
+    WARNING = "warning"
+    """Confirmed configuration that removes a safety net or capability."""
+    SUSPECTED = "suspected"
+    """Inferred from indirect evidence; may be intentional or harmless."""
+    NOT_CHECKED = "not_checked"
+    """Could not be evaluated (missing data, or not applicable to this firmware)."""
+    PASSED = "passed"
+    """Evaluated and found no problem."""
+
+
+class FindingSource(StrEnum):
+    VEHICLE = "vehicle_reported"
+    TELEMETRY = "telemetry"
+    PARAMETERS = "parameter_rule"
+    MAVFORGE = "mavforge"
+
+
+AIRWORTHINESS_DISCLAIMER = (
+    "MAVForge diagnostics cover a limited set of checks. Passing them does not mean the "
+    "vehicle is correctly configured, airworthy or safe to fly."
+)
+
+
+class Finding(_Model):
+    check: str = Field(description="Stable identifier of the check, e.g. 'ardupilot.accel_cal'.")
+    kind: FindingKind
+    title: str
+    detail: str
+    source: FindingSource
+    evidence: dict[str, float | int | str | bool | None] = Field(default_factory=dict)
+    recommendation: str | None = None
+    vehicle_text: Annotated[str | None, Field(description=UNTRUSTED_TEXT)] = None
+
+
+class DiagnosticReport(_Model):
+    status: OperationStatus
+    vehicle: VehicleIdentity
+    findings: list[Finding]
+    counts: dict[FindingKind, int]
+    prearm_requested: bool = Field(
+        description="True if the vehicle acknowledged a request to report pre-arm failures."
+    )
+    disclaimer: str = AIRWORTHINESS_DISCLAIMER
+    link: LinkStats

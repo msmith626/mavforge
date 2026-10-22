@@ -23,6 +23,7 @@ TOOLS = {
     "params_backup",
     "params_backups",
     "params_diff",
+    "diagnose",
 }
 CREATES_FILES = {"params_backup"}
 
@@ -164,3 +165,12 @@ def test_agents_cannot_diff_arbitrary_paths(fake: FakeVehicle, backup_id: str) -
     assert result.is_error
     assert "invalid_input" in result.content[0].text
     assert "PARAM_REQUEST_LIST" not in fake.received_types()
+
+
+def test_diagnose_tool(make_fake: FakeFactory) -> None:
+    fake = make_fake(prearm_failures=["Need 3D Fix"])
+    result = call(fake.connection_string, "diagnose")
+    assert not result.is_error
+    findings = result.structured_content["findings"]
+    assert findings[0]["kind"] == "fault"
+    assert findings[0]["vehicle_text"] == "PreArm: Need 3D Fix"

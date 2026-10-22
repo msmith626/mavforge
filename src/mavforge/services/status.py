@@ -113,37 +113,39 @@ def _fresh_heartbeat(session: Session) -> mavlink.MAVLink_heartbeat_message:
 
 
 def snapshot(session: Session) -> StatusReport:
-    def run() -> StatusReport:
-        heartbeat = _fresh_heartbeat(session)
-        got = request_messages(
-            session.connection,
-            *session.target,
-            [mavlink.MAVLINK_MSG_ID_SYS_STATUS, mavlink.MAVLINK_MSG_ID_GPS_RAW_INT],
-            timeout=session.options.request_timeout,
-        )
-        sys_status = got[mavlink.MAVLINK_MSG_ID_SYS_STATUS]
-        gps = got[mavlink.MAVLINK_MSG_ID_GPS_RAW_INT]
-        unavailable = [
-            name for name, msg in (("SYS_STATUS", sys_status), ("GPS_RAW_INT", gps)) if msg is None
-        ]
-        have_sys = isinstance(sys_status, mavlink.MAVLink_sys_status_message)
-        prearm_enabled, prearm_passing = _prearm(sys_status) if have_sys else (None, None)  # type: ignore[arg-type]
-        return StatusReport(
-            status=OperationStatus.PARTIAL if unavailable else OperationStatus.SUCCEEDED,
-            vehicle=session.identity,
-            armed=bool(heartbeat.base_mode & mavlink.MAV_MODE_FLAG_SAFETY_ARMED),
-            mode=session.adapter.mode_name(heartbeat),
-            system_status=enum_name("MAV_STATE", heartbeat.system_status),
-            prearm_checks_enabled=prearm_enabled,
-            prearm_checks_passing=prearm_passing,
-            sensors=_sensors(sys_status) if have_sys else [],  # type: ignore[arg-type]
-            battery=_battery(sys_status) if have_sys else None,  # type: ignore[arg-type]
-            gps=_gps(gps) if isinstance(gps, mavlink.MAVLink_gps_raw_int_message) else None,
-            recent_statustext=session.connection.statustexts(session.identity.system_id)[
-                -STATUSTEXT_LIMIT:
-            ],
-            unavailable=unavailable,
-            link=session.link_stats(),
-        )
+    return run_operation(session, STATUS, lambda: build_status(session))
 
-    return run_operation(session, STATUS, run)
+
+def build_status(session: Session) -> StatusReport:
+    """Collect the status snapshot (unaudited; callers wrap it in an operation)."""
+    heartbeat = _fresh_heartbeat(session)
+    got = request_messages(
+        session.connection,
+        *session.target,
+        [mavlink.MAVLINK_MSG_ID_SYS_STATUS, mavlink.MAVLINK_MSG_ID_GPS_RAW_INT],
+        timeout=session.options.request_timeout,
+    )
+    sys_status = got[mavlink.MAVLINK_MSG_ID_SYS_STATUS]
+    gps = got[mavlink.MAVLINK_MSG_ID_GPS_RAW_INT]
+    unavailable = [
+        name for name, msg in (("SYS_STATUS", sys_status), ("GPS_RAW_INT", gps)) if msg is None
+    ]
+    have_sys = isinstance(sys_status, mavlink.MAVLink_sys_status_message)
+    prearm_enabled, prearm_passing = _prearm(sys_status) if have_sys else (None, None)  # type: ignore[arg-type]
+    return StatusReport(
+        status=OperationStatus.PARTIAL if unavailable else OperationStatus.SUCCEEDED,
+        vehicle=session.identity,
+        armed=bool(heartbeat.base_mode & mavlink.MAV_MODE_FLAG_SAFETY_ARMED),
+        mode=session.adapter.mode_name(heartbeat),
+        system_status=enum_name("MAV_STATE", heartbeat.system_status),
+        prearm_checks_enabled=prearm_enabled,
+        prearm_checks_passing=prearm_passing,
+        sensors=_sensors(sys_status) if have_sys else [],  # type: ignore[arg-type]
+        battery=_battery(sys_status) if have_sys else None,  # type: ignore[arg-type]
+        gps=_gps(gps) if isinstance(gps, mavlink.MAVLink_gps_raw_int_message) else None,
+        recent_statustext=session.connection.statustexts(session.identity.system_id)[
+            -STATUSTEXT_LIMIT:
+        ],
+        unavailable=unavailable,
+        link=session.link_stats(),
+    )

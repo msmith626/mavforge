@@ -9,10 +9,15 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from mavforge.domain.errors import InvalidInputError
 from mavforge.transport.dialect import mavlink
+
+if TYPE_CHECKING:
+    from mavforge.platforms.rules import ParamRule
 
 _PARAM_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,16}$")
 
@@ -41,6 +46,10 @@ class PlatformAdapter(ABC):
 
     @abstractmethod
     def mode_name(self, heartbeat: mavlink.MAVLink_heartbeat_message) -> str | None: ...
+
+    def param_rules(self) -> Sequence[ParamRule]:
+        """Platform-specific configuration rules used by diagnostics."""
+        return ()
 
     def is_volatile_param(self, name: str) -> bool:
         """True for parameters the firmware changes on its own (counters, boot-time

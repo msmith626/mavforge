@@ -29,6 +29,7 @@ See [docs/mavproxy.md](docs/mavproxy.md).
 | Read one parameter | `vehicle.params.get()` | `mavforge params get` | `params_get` | fake vehicle, ArduCopter 4.7.2 SITL |
 | Back up all parameters with vehicle identity (JSON, optional `.param` export) | `vehicle.params.backup()` | `mavforge params backup` | `params_backup` | fake vehicle, ArduCopter 4.7.2 SITL |
 | Diff vehicle vs a backup or `.param` file; diff two files offline | `vehicle.params.diff()`, `mavforge.diff_backups()` | `mavforge params diff` | `params_diff` | fake vehicle, ArduCopter 4.7.2 SITL |
+| Diagnose: classified findings (fault / warning / suspected / not checked / passed) from vehicle pre-arm reports, sensor health and ArduPilot configuration rules | `vehicle.diagnose()` | `mavforge diagnose` | `diagnose` | fake vehicle, ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
 | List backups | `mavforge.list_backups()` | `mavforge params backups` | `params_backups` | fake vehicle |
 | List operations and permissions | `mavforge.capabilities()` | `mavforge capabilities` | `mavforge_capabilities` | unit tests |
 
@@ -57,6 +58,7 @@ docker run --rm -p 127.0.0.1:5760:5760 mavforge-sitl:4.7.2 &
 
 uv run mavforge -c tcp:127.0.0.1:5760 --timeout 30 info
 uv run mavforge -c tcp:127.0.0.1:5760 status
+uv run mavforge -c tcp:127.0.0.1:5760 diagnose            # add --fail-on fault in scripts
 uv run mavforge -c tcp:127.0.0.1:5760 params list 'COMPASS_*'
 uv run mavforge -c tcp:127.0.0.1:5760 --json params get FRAME_CLASS
 

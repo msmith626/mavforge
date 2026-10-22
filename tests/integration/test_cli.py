@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 from mavforge.cli.app import app
 from mavforge.domain.errors import ExitCode
 from mavforge.testing.fake_vehicle import FakeFactory, FakeVehicle
+from mavforge.testing.scenarios import unconfigured_plane_params
 from mavforge.transport.dialect import mavlink
 
 runner = CliRunner()
@@ -131,3 +132,32 @@ def test_backups_list_and_bad_reference(fake: FakeVehicle) -> None:
     code, _, stderr = invoke("-c", fake.connection_string, "params", "diff", "../escape")
     assert code == ExitCode.USAGE
     assert "Invalid backup id" in stderr
+
+
+def test_diagnose_output_and_fail_on(make_fake: FakeFactory) -> None:
+    fake = make_fake(
+        mav_type=mavlink.MAV_TYPE_FIXED_WING,
+        params=unconfigured_plane_params(),
+        prearm_checks_enabled=False,
+    )
+    base = ("-c", fake.connection_string, "diagnose", "--prearm-wait", "0.5")
+    code, stdout, _ = invoke(*base)
+    assert code == ExitCode.OK
+    assert "[FAULT] Primary compass is not calibrated" in stdout
+    assert "[WARNING] All pre-arm checks are disabled" in stdout
+    assert "Run compass calibration" in stdout
+    assert "[passed]" not in stdout
+    assert "airworthy" in stdout
+
+    assert invoke(*base, "--fail-on", "fault")[0] == ExitCode.FAILED
+    assert invoke(*base, "--fail-on", "warning")[0] == ExitCode.FAILED
+    assert invoke(*base, "--fail-on", "bogus")[0] == ExitCode.USAGE
+    code, stdout, _ = invoke(*base, "--show-passed")
+    assert "[passed] Accelerometer calibration present" in stdout
+
+
+def test_diagnose_fail_on_passes_for_clean_vehicle(fake: FakeVehicle) -> None:
+    code, _, _ = invoke(
+        "-c", fake.connection_string, "diagnose", "--prearm-wait", "0.5", "--fail-on", "warning"
+    )
+    assert code == ExitCode.OK

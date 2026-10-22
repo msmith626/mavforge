@@ -27,6 +27,8 @@ from mavforge.domain.models import (
     BackupListResult,
     BackupResult,
     CapabilitiesResult,
+    DiagnosticReport,
+    FindingKind,
     InfoResult,
     ParamDiffResult,
     ParamGetResult,
@@ -133,17 +135,29 @@ def _fail(opts: GlobalOptions, exc: MAVForgeError) -> NoReturn:
     raise typer.Exit(int(exc.exit_code))
 
 
-def _emit[R: BaseModel](opts: GlobalOptions, result: R, render: Callable[[R], None]) -> NoReturn:
+def _status_exit_code(result: BaseModel) -> ExitCode:
+    status: OperationStatus = getattr(result, "status", OperationStatus.SUCCEEDED)
+    return exit_code_for(status)
+
+
+def _emit[R: BaseModel](
+    opts: GlobalOptions,
+    result: R,
+    render: Callable[[R], None],
+    exit_code: Callable[[R], ExitCode] = _status_exit_code,
+) -> NoReturn:
     if opts.json:
         out.print_json(result.model_dump_json())
     else:
         render(result)
-    status: OperationStatus = getattr(result, "status", OperationStatus.SUCCEEDED)
-    raise typer.Exit(int(exit_code_for(status)))
+    raise typer.Exit(int(exit_code(result)))
 
 
 def _with_vehicle[R: BaseModel](
-    ctx: typer.Context, action: Callable[[mavforge.Vehicle], R], render: Callable[[R], None]
+    ctx: typer.Context,
+    action: Callable[[mavforge.Vehicle], R],
+    render: Callable[[R], None],
+    exit_code: Callable[[R], ExitCode] = _status_exit_code,
 ) -> NoReturn:
     opts: GlobalOptions = ctx.obj
     if not opts.connection:
@@ -161,7 +175,7 @@ def _with_vehicle[R: BaseModel](
             result = action(vehicle)
     except MAVForgeError as exc:
         _fail(opts, exc)
-    _emit(opts, result, render)
+    _emit(opts, result, render, exit_code)
 
 
 def _offline[R: BaseModel](
@@ -371,6 +385,46 @@ def make_render_diff(include_volatile: bool) -> Callable[[ParamDiffResult], None
     return render
 
 
+_KIND_STYLE = {
+    FindingKind.FAULT: ("FAULT", "bold red"),
+    FindingKind.WARNING: ("WARNING", "yellow"),
+    FindingKind.SUSPECTED: ("SUSPECTED", "magenta"),
+    FindingKind.NOT_CHECKED: ("NOT CHECKED", "dim"),
+    FindingKind.PASSED: ("passed", "green"),
+}
+
+
+def make_render_diagnose(show_passed: bool) -> Callable[[DiagnosticReport], None]:
+    def render(r: DiagnosticReport) -> None:
+        out.print(
+            Text(
+                f"Diagnostics for {r.vehicle.autopilot} system {r.vehicle.system_id} "
+                f"({r.vehicle.vehicle_family or r.vehicle.mav_type}) firmware "
+                f"{r.vehicle.firmware or 'unknown'}",
+                style="bold",
+            )
+        )
+        for f in r.findings:
+            if f.kind is FindingKind.PASSED and not show_passed:
+                continue
+            label, style = _KIND_STYLE[f.kind]
+            line = Text(f"[{label}] ", style=style).append(Text(f.title, style="bold"))
+            out.print(line)
+            out.print(Text(f"    {f.detail}"))
+            if f.vehicle_text:
+                out.print(Text("    vehicle says: ").append(safe(f.vehicle_text)))
+            if f.recommendation:
+                out.print(Text(f"    -> {f.recommendation}", style="cyan"))
+        counts = ", ".join(f"{n} {k.value}" for k, n in r.counts.items())
+        out.print(Text(f"Summary: {counts}", style="bold"))
+        if not show_passed and r.counts.get(FindingKind.PASSED):
+            out.print(Text("Use --show-passed to list passed checks.", style="dim"))
+        out.print(Text(r.disclaimer, style="dim"))
+        _status_line(r.status)
+
+    return render
+
+
 def render_capabilities(r: CapabilitiesResult) -> None:
     table = Table(title=f"MAVForge {r.mavforge_version}", title_justify="left")
     table.add_column("Operation")
@@ -410,6 +464,42 @@ def status(ctx: typer.Context) -> None:
 def capabilities(ctx: typer.Context) -> None:
     """List MAVForge operations, their permissions and availability (no vehicle needed)."""
     _emit(ctx.obj, mavforge.capabilities(), render_capabilities)
+
+
+@app.command()
+def diagnose(
+    ctx: typer.Context,
+    show_passed: Annotated[
+        bool, typer.Option("--show-passed", help="Also list checks that passed.")
+    ] = False,
+    prearm_wait: Annotated[
+        float,
+        typer.Option(min=0.5, max=30, help="Seconds to collect pre-arm messages."),
+    ] = 3.0,
+    fail_on: Annotated[
+        str | None,
+        typer.Option(
+            "--fail-on",
+            help="Exit 1 if any finding is at least this serious: 'fault' or 'warning'.",
+        ),
+    ] = None,
+) -> None:
+    """Find configuration and readiness problems, classified by certainty (read-only)."""
+    if fail_on not in (None, "fault", "warning"):
+        raise typer.BadParameter("must be 'fault' or 'warning'", param_hint="--fail-on")
+    serious = {"fault": {FindingKind.FAULT}, "warning": {FindingKind.FAULT, FindingKind.WARNING}}
+
+    def exit_code(report: DiagnosticReport) -> ExitCode:
+        if fail_on and any(f.kind in serious[fail_on] for f in report.findings):
+            return ExitCode.FAILED
+        return _status_exit_code(report)
+
+    _with_vehicle(
+        ctx,
+        lambda v: v.diagnose(prearm_wait=prearm_wait),
+        make_render_diagnose(show_passed),
+        exit_code,
+    )
 
 
 @params_app.command("list")

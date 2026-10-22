@@ -166,3 +166,30 @@ Sources: https://modelcontextprotocol.io/specification/2026-07-28, https://githu
 - **GPS without a fix.** With `NO_FIX` the receiver reported `eph` = 9999 (HDOP 99.99), which is a placeholder. MAVForge reports HDOP only when there is a 2D or 3D fix.
 - **Bench state.** The board was on the bench with no RC receiver and no flight battery. It showed mode RTL with MAV_STATE CRITICAL and `RC_RECEIVER` unhealthy, which is consistent with a radio failsafe; the cause was not confirmed. The battery read about 0.14 V.
 - **Backup and diff.** I backed up all 1117 parameters, then diffed the live plane against that backup a few seconds later. The only change was `STAT_RUNTIME`, which was correctly flagged as volatile. The exported `.param` file round-trips all 1117 values exactly.
+- **Diagnostics.** `mavforge diagnose` reported:
+  - **Faults:** an uncalibrated primary compass (`COMPASS_OFS_*` = 0, `COMPASS_LEARN=0`), plus three live bench states from SYS_STATUS: GPS, RC receiver and terrain unhealthy.
+  - **Warnings:** pre-arm checks disabled, and no battery failsafe action.
+  - **Passed:** accelerometer calibration, radio calibration (1102/1895/1498), throttle failsafe, GPS configured, logging.
+
+## Diagnostics rules
+
+These are the sources for the ArduPilot rules in `platforms/ardupilot/rules.py`. The code was read at tag `Plane-4.6.2`, and the parameter names and values were checked against `apm.pdef.xml` for Plane stable-4.6.2 and Copter stable-4.7.1.
+
+- **Accelerometer.** `AP_InertialSensor::accel_calibrated_ok_all()` fails if any detected accelerometer's saved offset vector is exactly zero, or its scale is zero. The pre-arm message is `"3D Accel calibration needed"`. The rule checks only instances whose `INS_ACC{,2,3}_ID` parameter exists and is non-zero.
+- **Compass.**
+  - `AP_Arming::compass_checks()` requires configured compasses (`Compass::configured()`: offsets not all zero, and the device ID matches) on Copter, Heli and Blimp. On other vehicles it requires them unless `learn_offsets_enabled()`, which means `COMPASS_LEARN == 3` (`LEARN_INFLIGHT`, `AP_Compass.h`).
+  - Secondary compasses with zero offsets are reported as *suspected*: `COMPASS_USE2/3` are priority-indexed, so whether those compasses are actually used can't be determined from parameters.
+- **RC.**
+  - `AP_Arming::rc_calibration_checks()` only rejects `RCn_MIN > RCn_TRIM` or `RCn_MAX < RCn_TRIM`, for channels with a live signal.
+  - Firmware defaults (1100/1900/1500) on all four primary channels are a MAVForge inference. That's why the rule reports *suspected*, not *fault*.
+- **Arming checks.**
+  - `ARMING_CHECK` (≤4.6) is a bitmask where bit 0 means All.
+  - `ARMING_SKIPCHK` (4.7) is inverted: 0 means skip nothing.
+  - Bit names come from the metadata.
+- **Failsafes.** The rule reads Plane `THR_FAILSAFE` (0 Disabled, 1 Enabled, 2 EnabledNoFailsafe) and Copter `FS_THR_ENABLE`. `BATT_FS_LOW_ACT` / `BATT_FS_CRT_ACT` = 0 means "None" on Plane and "Warn only" on Copter, so no action either way.
+- **Pre-arm reasons.** `MAV_CMD_RUN_PREARM_CHECKS` returns ACCEPTED on SITL and real hardware, then STATUSTEXT `"PreArm: …"`. ArduPilot refuses it while armed.
+  - Right after boot, SITL reports transient failures that cleared within about 15 s: `Accels inconsistent`, `EKF attitude is bad`, `AHRS: EKF3 not started`, `Compass 1 not healthy`, `Battery 1 unhealthy`.
+  - For this reason MAVForge warns when `SYSTEM_TIME.time_boot_ms` is under 60 s.
+- **Rejected rule: "value outside documented range".**
+  - On the stock ArduPlane 4.6.2 configuration it flagged 17 parameters. Nearly all were firmware defaults where 0 means "disabled" but falls outside the documented range (e.g. `AIRSPEED_STALL`, `FENCE_TOTAL`), or board-specific pin numbers.
+  - That is too noisy for diagnostics. Range validation belongs at write time instead (planned).

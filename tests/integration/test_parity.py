@@ -76,6 +76,7 @@ CASES: list[tuple[str, Callable[[mavforge.Vehicle], Any], list[str], str, dict[s
         "params_get",
         {"name": "LOG_BITMASK"},
     ),
+    ("diagnose", lambda v: v.diagnose(), ["diagnose"], "diagnose", {}),
 ]
 
 

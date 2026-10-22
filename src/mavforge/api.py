@@ -22,6 +22,7 @@ from mavforge.domain.models import (
     BackupListResult,
     BackupResult,
     CapabilitiesResult,
+    DiagnosticReport,
     InfoResult,
     ParamBackup,
     ParamDiffResult,
@@ -33,10 +34,12 @@ from mavforge.domain.models import (
 from mavforge.policy.audit import AuditLog
 from mavforge.policy.permissions import Policy
 from mavforge.services import backup as backup_service
+from mavforge.services import diagnostics as diagnostics_service
 from mavforge.services import diff as diff_service
 from mavforge.services import info as info_service
 from mavforge.services import params as params_service
 from mavforge.services import status as status_service
+from mavforge.services.diagnostics import DEFAULT_PREARM_WAIT
 from mavforge.services.session import (
     HEARTBEAT_TIMEOUT,
     ConnectOptions,
@@ -91,6 +94,13 @@ class Vehicle:
 
     def status(self) -> StatusReport:
         return status_service.snapshot(self.session)
+
+    def diagnose(self, *, prearm_wait: float = DEFAULT_PREARM_WAIT) -> DiagnosticReport:
+        """Classified findings from pre-arm reports, sensor health and configuration rules.
+
+        Read-only: also asks the firmware to run (not change) its pre-arm checks.
+        """
+        return diagnostics_service.diagnose(self.session, prearm_wait=prearm_wait)
 
     @property
     def is_connected(self) -> bool:
