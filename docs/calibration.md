@@ -56,7 +56,7 @@ needs a reboot, the result says so.
 
 | Workflow | ArduPilot | Fake vehicle | ArduCopter 4.7.2 SITL | Hardware | Via MCP |
 |---|---|---|---|---|---|
-| Gyro | yes | success + failure | **passed** | not yet | yes |
+| Gyro | yes | success + failure | **passed** | **passed** on ArduPlane 4.6.2 (one IMU; offsets moved by under 0.0004 rad/s) | yes |
 | Level (AHRS trim) | yes | success + rejected | **passed** | not yet | yes |
 | Compass (onboard) | yes, if `COMPASS_CALIBRATION` capability | success (1 and 3 compasses), per-compass failure, accept-without-save, cancel, timeout | **passed** (3 compasses, `calibration` model) | **passed**: ArduPlane 4.6.2, 1 compass, USB power only (2026-10-23) | yes |
 | Accelerometer, 6 positions | yes | success, failure, silence, cancel | **passed** (`calibration` model) | not yet | **no** |
