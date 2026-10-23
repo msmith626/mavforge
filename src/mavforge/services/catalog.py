@@ -69,14 +69,21 @@ DIAGNOSE = OperationSpec(
     False,
 )
 
+PARAMS_PLAN = OperationSpec(
+    "params_plan",
+    "Validate requested parameter values and record a reviewable change plan "
+    "(does not change the vehicle).",
+    Permission.READ,
+    False,
+)
+PARAMS_APPLY = OperationSpec(
+    "params_apply",
+    "Apply a human-approved plan: backup, write each value, verify by read-back.",
+    Permission.CONFIGURE,
+    True,
+)
+
 _PLANNED = [
-    OperationSpec(
-        "params_change",
-        "Plan, approve, apply and verify parameter changes.",
-        Permission.CONFIGURE,
-        True,
-        False,
-    ),
     OperationSpec(
         "calibrate", "Deterministic calibration workflows.", Permission.CALIBRATE, True, False
     ),
@@ -90,6 +97,8 @@ CATALOG: list[OperationSpec] = [
     PARAMS_BACKUP,
     PARAMS_DIFF,
     DIAGNOSE,
+    PARAMS_PLAN,
+    PARAMS_APPLY,
     *_PLANNED,
 ]
 
@@ -130,6 +139,7 @@ def run_operation[T](
                 **audit_fields,
             )
         except OSError as exc:
-            if spec.modifies_vehicle:
-                raise
-            log.warning("Could not write audit log entry: %s", exc)
+            # Never mask the operation's real outcome or error. Modifying operations
+            # fail closed *before* writing (see changes.apply_plan); this is the record
+            # of how it ended.
+            log.error("Could not write audit log entry for %s: %s", spec.name, exc)

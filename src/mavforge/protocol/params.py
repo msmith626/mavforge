@@ -17,8 +17,8 @@ from mavforge.domain.errors import (
     ParamNotFoundError,
     ProtocolError,
 )
-from mavforge.domain.models import FLOAT_EXACT_INT_LIMIT, ParamType, ParamValue
-from mavforge.domain.values import normalize
+from mavforge.domain.models import FLOAT_EXACT_INT_LIMIT, ChangeOutcome, ParamType, ParamValue
+from mavforge.domain.values import normalize, values_equal
 from mavforge.transport.connection import MavlinkConnection
 from mavforge.transport.dialect import Message, enum_name, mavlink
 
@@ -166,4 +166,87 @@ def read_param(
         f"No response reading parameter {name}. It may not exist on this firmware "
         "(older ArduPilot versions do not report unknown names), or the link is lossy.",
         details={"param": name, "attempts": retries + 1},
+    )
+
+
+@dataclass(frozen=True)
+class WriteResult:
+    outcome: ChangeOutcome
+    after: float | int | None
+    detail: str | None = None
+
+
+def write_param(
+    conn: MavlinkConnection,
+    target_system: int,
+    target_component: int,
+    name: str,
+    value: float | int,
+    ptype: ParamType,
+    *,
+    timeout: float = 1.0,
+    retries: int = 2,
+) -> WriteResult:
+    """Write one parameter and verify it by reading it back.
+
+    PARAM_SET of a fixed value is idempotent, so it is retried. The write counts as
+    VERIFIED only if the value read back (or, failing that, the vehicle's PARAM_VALUE
+    echo) equals the requested value as the vehicle stores it.
+    """
+
+    def match(msg: Message) -> bool:
+        if not _from_target(target_system, target_component, msg):
+            return False
+        if isinstance(
+            msg, mavlink.MAVLink_param_value_message | mavlink.MAVLink_param_error_message
+        ):
+            return str(msg.param_id).rstrip("\x00") == name
+        return False
+
+    echo: ParamValue | None = None
+    with conn.subscribe(match) as sub:
+        for _ in range(retries + 1):
+            conn.send(
+                mavlink.MAVLink_param_set_message(
+                    target_system,
+                    target_component,
+                    name.encode(),
+                    float(value),
+                    getattr(mavlink, f"MAV_PARAM_TYPE_{ptype.value}"),
+                )
+            )
+            msg = sub.get(timeout)
+            if msg is None:
+                continue
+            if isinstance(msg, mavlink.MAVLink_param_error_message):
+                return WriteResult(
+                    ChangeOutcome.FAILED,
+                    None,
+                    f"Vehicle rejected the write: {enum_name('MAV_PARAM_ERROR', msg.error)}",
+                )
+            assert isinstance(msg, mavlink.MAVLink_param_value_message)
+            echo = decode_param_value(msg)
+            break
+
+    try:
+        after: ParamValue | None = read_param(
+            conn, target_system, target_component, name, timeout=timeout, retries=retries
+        )
+        how = "read back"
+    except ParamNotFoundError:
+        return WriteResult(ChangeOutcome.FAILED, None, "Parameter disappeared from the vehicle")
+    except OperationTimeoutError:
+        after, how = echo, "write echo only (read-back timed out)"
+    if after is None:
+        return WriteResult(
+            ChangeOutcome.UNKNOWN,
+            None,
+            "No echo and no read-back: the value may or may not have changed",
+        )
+    if values_equal(after.value, value, ptype):
+        return WriteResult(ChangeOutcome.VERIFIED, after.value, f"Verified by {how}")
+    return WriteResult(
+        ChangeOutcome.FAILED,
+        after.value,
+        f"Vehicle reports {after.value} after the write (it may have constrained the value)",
     )

@@ -17,7 +17,7 @@ class Permission(StrEnum):
     READ = "read"
     """Observe the vehicle. No vehicle state is changed."""
     CONFIGURE = "configure"
-    """Change parameters (with review, approval and verification). Not yet implemented."""
+    """Change parameters through reviewed, approved and verified plans."""
     CALIBRATE = "calibrate"
     """Run calibration workflows. Not yet implemented."""
     MAINTENANCE = "maintenance"
@@ -27,10 +27,28 @@ class Permission(StrEnum):
 @dataclass(frozen=True)
 class Policy:
     granted: frozenset[Permission] = field(default_factory=lambda: frozenset({Permission.READ}))
+    allow_real_vehicle: bool = False
+    """Allow modifying operations on vehicles not identified as simulators. Off by default:
+    an operator must opt in explicitly before anything changes real hardware."""
 
     @classmethod
     def read_only(cls) -> Policy:
         return cls()
+
+    @classmethod
+    def configure(cls, *, allow_real_vehicle: bool) -> Policy:
+        return cls(
+            granted=frozenset({Permission.READ, Permission.CONFIGURE}),
+            allow_real_vehicle=allow_real_vehicle,
+        )
+
+    def require_vehicle_writable(self, simulated: bool | None, operation: str) -> None:
+        if simulated is not True and not self.allow_real_vehicle:
+            raise NotPermittedError(
+                f"Operation {operation!r} would modify a real (non-simulated) vehicle, which "
+                "the active policy does not allow",
+                details={"operation": operation, "simulated": simulated},
+            )
 
     def allows(self, permission: Permission) -> bool:
         return permission in self.granted

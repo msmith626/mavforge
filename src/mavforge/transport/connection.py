@@ -57,6 +57,10 @@ def open_failure_hint(spec: ConnectionSpec, exc: Exception) -> str:
     return ""
 
 
+def _raise_closed() -> None:
+    raise ConnectionResetError("peer closed the connection")
+
+
 class PymavlinkTransport:
     """``Transport`` over ``mavutil.mavlink_connection``. Not thread-safe by itself."""
 
@@ -75,6 +79,12 @@ class PymavlinkTransport:
                 details={"connection": str(spec)},
             ) from exc
         self._errors = 0
+        if hasattr(self._conn, "handle_eof"):
+            # pymavlink's TCP class answers EOF/reset by printing to stdout and calling
+            # reconnect(), which is a no-op without autoreconnect: recv() then returns
+            # nothing forever and the loss goes unnoticed. Surface it as a link failure.
+            self._conn.handle_eof = _raise_closed
+            self._conn.handle_disconnect = _raise_closed
 
     def recv(self, timeout: float) -> Message | None:
         msg = self._conn.recv_match(blocking=True, timeout=timeout)

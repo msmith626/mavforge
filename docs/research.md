@@ -20,6 +20,8 @@ Sources: https://pypi.org/project/pymavlink/, https://github.com/ArduPilot/pymav
 - **`mavlink_connection` executes certain inputs.** It opens log files, and it executes paths ending in `.elf` or containing `/bin/`. A bare `host:port` is treated as UDP.
   → `mavforge/transport/connstr.py` only accepts tcp/tcpin/udpin/udpout/serial. [source]
 - **Prints to stdout** on some TCP errors. The MCP SDK v2 stdio transport claims fd 1 and diverts stray writes. [source]
+- **TCP EOF is never reported.** `mavtcp.recv()` answers EOF and reset with `handle_eof()` / `handle_disconnect()`. Those print to stdout and call `reconnect()`, which does nothing when `autoreconnect=False`. The socket then stays readable at EOF forever: the loss is never reported, and every poll prints again. MAVForge replaces both handlers so they raise, which turns the loss into a link failure. Covered by a regression test. [verified]
+- **SITL start-up window.** Once, ArduCopter SITL closed the first test connection shortly after a bare TCP readiness probe. The SITL fixture now waits for a full MAVLink session instead. Could not be reproduced in 7 later runs. [verified once]
 - **Missing enum entries.** pymavlink 2.4.50's generated `ardupilotmega` dialect has no `MAV_RESULT_CANCELLED` (6), and no values 9 or 10, all of which are in upstream `common.xml`. MAVForge maps them by number. [verified locally]
 - **Different `MAV_TYPE` names.** It lacks some newer `MAV_TYPE` names, e.g. it has `VTOL_DUOROTOR` rather than `VTOL_TAILSITTER_DUOROTOR`. Adapters resolve names defensively. [verified locally]
 
@@ -193,3 +195,16 @@ These are the sources for the ArduPilot rules in `platforms/ardupilot/rules.py`.
 - **Rejected rule: "value outside documented range".**
   - On the stock ArduPlane 4.6.2 configuration it flagged 17 parameters. Nearly all were firmware defaults where 0 means "disabled" but falls outside the documented range (e.g. `AIRSPEED_STALL`, `FENCE_TOTAL`), or board-specific pin numbers.
   - That is too noisy for diagnostics. Range validation belongs at write time instead (planned).
+
+## Parameter writes
+
+- **Write path.** `PARAM_SET` carries the value as a float and the stored type; ArduPilot uses its stored type.
+  - **ArduCopter 4.7.2 SITL:** `RC1_TRIM` and `BATT_FS_LOW_ACT` were written, verified by `PARAM_REQUEST_READ`, and restored. Each write was echoed with `PARAM_VALUE`. [verified]
+  - **ArduPlane 4.6.2 hardware (USB):** `BATT_CAPACITY` 3300→3400 and `FS_SHORT_TIMEOUT` 1.5→2.0 were written and verified by read-back. Both were then restored from the automatic pre-change backup and verified again. A later diff against the 2026-10-21 baseline showed no configuration differences, only volatile ones. The parameters were chosen with the board owner's consent as having no physical effect while disarmed on the bench. [verified]
+- **Metadata availability** (2026-10-23):
+  - `versioned/Plane/stable-4.6.2/apm.pdef.xml` exists: 4818 definitions, including `FS_SHORT_TIMEOUT` range 1..100.
+  - `versioned/Copter/` stops at stable-4.7.1, so ArduCopter 4.7.2 falls back to the latest development definitions, and plans say so.
+  - The versioned directories publish XML only.
+
+  [verified]
+- **MCP elicitation, `mcp` 2.3.0.** A tool parameter annotated `Annotated[..., Resolve(fn)]` is left out of the tool's input schema and is filled by the server-side resolver. An agent-supplied argument with the same name is ignored. A client without elicitation support can be detected through `ctx.client_capabilities.elicitation` and given a fallback. A declined elicitation aborts the call. [verified with spike and tests]

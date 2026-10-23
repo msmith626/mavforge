@@ -73,6 +73,13 @@ class NotPermittedError(MAVForgeError):
     exit_code = ExitCode.NOT_PERMITTED
 
 
+class NotApprovedError(MAVForgeError):
+    """A human declined, or has not yet given, approval for a change plan."""
+
+    code = "not_approved"
+    exit_code = ExitCode.FAILED
+
+
 class UnsupportedError(MAVForgeError):
     """The vehicle, firmware or platform adapter does not support the operation."""
 

@@ -21,7 +21,7 @@ from mavforge.domain.errors import NotPermittedError
 from mavforge.mcp.server import VehicleProvider, build_server
 from mavforge.policy.permissions import Policy
 from mavforge.services.session import ConnectOptions
-from mavforge.testing.fake_vehicle import FakeVehicle
+from mavforge.testing.fake_vehicle import FakeFactory, FakeVehicle
 
 VOLATILE = {"link", "received_at"}
 
@@ -172,3 +172,51 @@ def test_backup_and_diff_parity(fake: FakeVehicle, isolated_state_dir: Path) -> 
     ]
     assert diffs[0] == diffs[1] == diffs[2]
     assert diffs[0]["changed"] == []
+
+
+def test_apply_parity(make_fake: FakeFactory) -> None:
+    """The same change through the API, CLI and MCP yields the same per-parameter result."""
+    from mcp_types import ElicitResult
+
+    def normalize(result: dict[str, Any]) -> Any:
+        return [
+            (c["name"], c["before"], c["requested"], c["after"], c["outcome"])
+            for c in result["changes"]
+        ]
+
+    results = []
+    fake = make_fake()
+    with mavforge.connect(
+        fake.connection_string, policy=Policy.configure(allow_real_vehicle=False)
+    ) as v:
+        plan = v.params.plan({"RC1_TRIM": 1490})
+        mavforge.approve_plan(plan)
+        results.append(json.loads(v.params.apply(plan).model_dump_json()))
+
+    fake = make_fake()
+    cli = CliRunner().invoke(
+        app, ["-c", fake.connection_string, "--json", "params", "set", "RC1_TRIM=1490", "-y"]
+    )
+    results.append(json.loads(cli.stdout))
+
+    fake = make_fake()
+    policy = Policy.configure(allow_real_vehicle=False)
+    provider = VehicleProvider(ConnectOptions(connection=fake.connection_string), policy)
+
+    async def accept(ctx: Any, params: Any) -> ElicitResult:
+        return ElicitResult(action="accept", content={"approve": True})
+
+    async def go() -> Any:
+        callbacks: dict[str, Any] = {"elicitation_callback": accept}
+        async with Client(build_server(provider, policy), **callbacks) as client:
+            plan = await client.call_tool("params_plan", {"changes": {"RC1_TRIM": 1490}})
+            return await client.call_tool(
+                "params_apply", {"plan_id": plan.structured_content["plan_id"]}
+            )
+
+    try:
+        results.append(anyio.run(go).structured_content)
+    finally:
+        provider.close()
+    assert normalize(results[0]) == normalize(results[1]) == normalize(results[2])
+    assert {r["approved_by"] for r in results} == {"api", "cli-yes-flag", "mcp-elicitation"}

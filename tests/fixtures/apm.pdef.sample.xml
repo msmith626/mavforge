@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Excerpt in the format of ArduPilot's apm.pdef.xml (Plane stable-4.6.2), trimmed for tests. -->
+<paramfile>
+  <vehicles>
+    <parameters name="ArduPlane">
+      <param humanName="Throttle and RC Failsafe Enable" name="ArduPlane:THR_FAILSAFE" documentation="Throttle failsafe" user="Standard">
+        <values><value code="0">Disabled</value><value code="1">Enabled</value><value code="2">EnabledNoFailsafe</value></values>
+      </param>
+      <param humanName="Arm Checks to Perform (bitmask)" name="ArduPlane:ARMING_CHECK" documentation="Checks prior to arming" user="Standard">
+        <field name="Bitmask">0:All,1:Barometer,2:Compass,3:GPS lock</field>
+      </param>
+    </parameters>
+  </vehicles>
+  <libraries>
+    <parameters name="RC1_">
+      <param humanName="RC min PWM" name="RC1_MIN" documentation="RC minimum PWM" user="Advanced">
+        <field name="Range">800 2200</field><field name="Units">PWM</field>
+      </param>
+    </parameters>
+    <parameters name="SERIAL">
+      <param humanName="Telem1 protocol selection" name="SERIAL1_PROTOCOL" documentation="Protocol" user="Standard">
+        <field name="RebootRequired">True</field>
+        <values><value code="-1">None</value><value code="2">MAVLink2</value></values>
+      </param>
+    </parameters>
+    <parameters name="INS_">
+      <param humanName="Accelerometer ID" name="INS_ACC_ID" documentation="ID" user="Advanced">
+        <field name="ReadOnly">True</field>
+      </param>
+    </parameters>
+    <parameters name="BARO">
+      <param humanName="Ground Pressure" name="BARO1_GND_PRESS" documentation="calibrated" user="Advanced">
+        <field name="Volatile">True</field><field name="ReadOnly">True</field>
+      </param>
+    </parameters>
+  </libraries>
+</paramfile>

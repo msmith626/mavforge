@@ -17,9 +17,9 @@ Cells for other tools come from reading their source and documentation
 | Primary form | Library + one-shot CLI + MCP | Interactive console GCS + router | Windows GUI GCS | Tkinter GUI wizard | MCP server |
 | Typed Python API | yes | no (module API) | no (C#) | internal only | no |
 | Machine-readable output and exit codes | yes | no | no | no | JSON over MCP |
-| Parameter writes verified by value read-back | planned | name echo only (pymavlink `mavset`) | name echo only | not assessed | not assessed |
+| Parameter writes verified by value read-back | yes | name echo only (pymavlink `mavset`) | name echo only | not assessed | not assessed |
 | Backups bound to vehicle and firmware identity | yes | no | no | not assessed | no |
-| Plan → approve → apply, with audit log | planned (audit log done) | no | no | records a reason per change | `confirm` flags |
+| Plan → approve → apply, with audit log | yes | no | no | records a reason per change | `confirm` flags |
 | Calibration as deterministic state machines with evidence | planned | relays prompts | UI-driven | no | no |
 | AI agent access under a shared policy | yes (read-only so far) | no | no | no | yes, but flight-oriented |
 | Missions, maps, flight control, arming | **no, by design** | yes | yes | no | yes |
@@ -55,16 +55,21 @@ station.
   - 7 SITL tests against ArduCopter 4.7.2.
   - Opt-in hardware smoke tests, passed on one ArduPlane 4.6.2 flight controller over USB.
 
-**Not done** (see [roadmap.md](roadmap.md)):
-- Parameter writes and restore (backup and diff are done: milestone M2a).
+**Done since M1:**
+- Backup/diff (M2a).
+- Diagnostics (M3).
+- Parameter changes with approval, verification and restore, plus versioned ArduPilot
+  metadata (M4).
+
+See [roadmap.md](roadmap.md).
+
+**Not done:**
 - MAVFTP parameter download.
-- Parameter metadata.
-- Diagnostics beyond the first rule set (done: milestone M3; more rules planned).
+- More diagnostic rules.
 - Calibration workflows.
-- Approval flow.
 - Reconnect-aware long operations.
 - HTTP MCP transport.
-- Hardware coverage beyond one board (ArduPlane 4.6.2, read-only, Python API).
+- Hardware coverage beyond one board (ArduPlane 4.6.2).
 - Any non-ArduPilot platform adapter.
 
 ## Minimum viable end-to-end use case (M1)

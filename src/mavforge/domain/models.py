@@ -379,3 +379,112 @@ class DiagnosticReport(_Model):
     )
     disclaimer: str = AIRWORTHINESS_DISCLAIMER
     link: LinkStats
+
+
+PLAN_FORMAT = "mavforge.param-plan"
+
+
+class PlannedChange(_Model):
+    name: str
+    display_name: str | None = None
+    current: float | int | None = Field(description="None if the vehicle lacks the parameter.")
+    requested: float | int
+    type: ParamType
+    units: str | None = None
+    range: tuple[float, float] | None = Field(
+        default=None, description="Documented range from ArduPilot metadata, if any."
+    )
+    current_label: str | None = Field(default=None, description="Meaning of the current value.")
+    requested_label: str | None = Field(default=None, description="Meaning of the new value.")
+    reboot_required: bool | None = Field(
+        default=None, description="True if the firmware only uses the new value after a reboot."
+    )
+    no_change: bool = Field(description="The vehicle already has this value; nothing to write.")
+    issues: list[str] = Field(
+        default_factory=list, description="Problems that block this plan from being applied."
+    )
+    warnings: list[str] = Field(
+        default_factory=list, description="Risks the approver must read before approving."
+    )
+
+
+class ChangePlan(_Model):
+    """A reviewed, immutable set of parameter changes for one specific vehicle."""
+
+    format: Literal["mavforge.param-plan"] = PLAN_FORMAT
+    schema_version: Literal[1] = 1
+    plan_id: str
+    digest: str = Field(description="SHA-256 of the plan content; approvals are bound to it.")
+    created_at: datetime
+    kind: Literal["set", "restore"]
+    source: str | None = Field(default=None, description="Backup a restore plan was made from.")
+    vehicle: VehicleIdentity
+    changes: list[PlannedChange]
+    metadata_source: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    blocked: bool = Field(
+        description="True if any change has issues; such plans cannot be applied."
+    )
+
+
+class Approval(_Model):
+    plan_id: str
+    digest: str
+    approved_by: str = Field(description="How approval was given, e.g. 'cli-prompt'.")
+    approved_at: datetime
+    expires_at: datetime
+
+
+class ChangeOutcome(StrEnum):
+    VERIFIED = "verified"
+    """Written and confirmed by reading the value back."""
+    UNCHANGED = "unchanged"
+    """Already had the requested value; not written."""
+    FAILED = "failed"
+    """The vehicle rejected the write or the read-back value differs."""
+    UNKNOWN = "unknown"
+    """No conclusive answer (timeout / link lost); the value may or may not have changed."""
+    SKIPPED = "skipped"
+    """Not written because the value changed since the plan was made."""
+    NOT_ATTEMPTED = "not_attempted"
+    """Not written because an earlier problem stopped the run."""
+
+
+class AppliedChange(_Model):
+    name: str
+    before: float | int | None
+    requested: float | int
+    after: float | int | None
+    outcome: ChangeOutcome
+    detail: str | None = None
+
+
+class ApplyResult(_Model):
+    status: OperationStatus
+    plan_id: str
+    vehicle: VehicleIdentity
+    approved_by: str
+    pre_change_backup: str | None = Field(
+        description="Backup taken immediately before writing; restore from it if needed."
+    )
+    changes: list[AppliedChange]
+    reboot_required: list[str] = Field(
+        default_factory=list, description="Verified changes that only take effect after a reboot."
+    )
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PlanInfo(_Model):
+    plan_id: str
+    created_at: datetime
+    kind: str
+    vehicle: str
+    change_count: int
+    blocked: bool
+    approved: bool
+    applied: bool
+
+
+class PlanListResult(_Model):
+    status: OperationStatus
+    plans: list[PlanInfo]

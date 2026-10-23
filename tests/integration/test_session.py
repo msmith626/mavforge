@@ -63,3 +63,24 @@ def test_unknown_autopilot_uses_generic_adapter(make_fake: FakeFactory) -> None:
         assert vehicle.identity.platform == "generic"
         assert vehicle.identity.simulated is None
         assert vehicle.status().mode is None
+
+
+def test_tcp_link_loss_is_detected_not_silently_ignored(
+    make_fake: FakeFactory, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Regression: pymavlink's TCP EOF handling printed to stdout forever and never
+    reported the loss. The connection must close and waiters must get an error."""
+    import time
+
+    from mavforge.domain.errors import ConnectionFailedError
+
+    fake = make_fake()
+    with mavforge.connect(fake.connection_string) as vehicle:
+        fake.stop()
+        deadline = time.monotonic() + 3
+        while vehicle.is_connected and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not vehicle.is_connected
+        with pytest.raises(ConnectionFailedError):
+            vehicle.params.get("FRAME_CLASS")
+    assert "EOF on TCP socket" not in capfd.readouterr().out

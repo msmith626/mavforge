@@ -22,11 +22,14 @@ from rich.table import Table
 from rich.text import Text
 
 import mavforge
-from mavforge.domain.errors import ExitCode, MAVForgeError
+from mavforge.domain.errors import ExitCode, MAVForgeError, NotApprovedError
 from mavforge.domain.models import (
+    ApplyResult,
     BackupListResult,
     BackupResult,
     CapabilitiesResult,
+    ChangeOutcome,
+    ChangePlan,
     DiagnosticReport,
     FindingKind,
     InfoResult,
@@ -35,10 +38,12 @@ from mavforge.domain.models import (
     ParamListResult,
     ParamPresence,
     ParamValue,
+    PlanListResult,
     StatusReport,
 )
 from mavforge.domain.outcomes import OperationStatus, exit_code_for
 from mavforge.domain.values import format_value
+from mavforge.policy.permissions import Policy
 from mavforge.transport.connection import DEFAULT_SOURCE_COMPONENT, DEFAULT_SOURCE_SYSTEM
 
 EXIT_CODES_HELP = (
@@ -158,6 +163,7 @@ def _with_vehicle[R: BaseModel](
     action: Callable[[mavforge.Vehicle], R],
     render: Callable[[R], None],
     exit_code: Callable[[R], ExitCode] = _status_exit_code,
+    policy: Policy | None = None,
 ) -> NoReturn:
     opts: GlobalOptions = ctx.obj
     if not opts.connection:
@@ -170,6 +176,7 @@ def _with_vehicle[R: BaseModel](
             source_system=opts.source_system,
             source_component=opts.source_component,
             timeout=opts.timeout,
+            policy=policy,
             interface="cli",
         ) as vehicle:
             result = action(vehicle)
@@ -425,6 +432,160 @@ def make_render_diagnose(show_passed: bool) -> Callable[[DiagnosticReport], None
     return render
 
 
+def _value(value: float | int, label: str | None) -> str:
+    return format_value(value) + (f" ({label})" if label else "")
+
+
+def render_plan(plan: ChangePlan) -> None:
+    """Show a plan to the human who will approve it. Goes to stderr in --json mode."""
+    console = err
+    v = plan.vehicle
+    console.print(
+        Text(
+            f"Change plan {plan.plan_id} ({plan.kind}"
+            + (f" from {plan.source}" if plan.source else "")
+            + f") for system {v.system_id} {v.autopilot} {v.vehicle_family or v.mav_type} "
+            f"firmware {v.firmware or 'unknown'}",
+            style="bold",
+        )
+    )
+    table = Table(box=None, pad_edge=False)
+    for column in ("Parameter", "Current", "New", "Range", "Reboot", ""):
+        table.add_column(column)
+    for c in plan.changes:
+        rng = f"{format_value(c.range[0])}..{format_value(c.range[1])}" if c.range else ""
+        reboot = {True: "yes", False: "", None: "?"}[c.reboot_required]
+        mark = Text("no change", style="dim") if c.no_change else Text("")
+        if c.issues:
+            mark = Text("BLOCKED", style="bold red")
+        elif c.warnings:
+            mark = Text("warning", style="yellow")
+        table.add_row(
+            Text(c.name, style="bold"),
+            _value(c.current, c.current_label) if c.current is not None else "(none)",
+            _value(c.requested, c.requested_label),
+            rng,
+            reboot,
+            mark,
+        )
+    console.print(table)
+    for c in plan.changes:
+        for issue in c.issues:
+            console.print(Text(f"  {c.name}: {issue}", style="red"))
+        for warning in c.warnings:
+            console.print(Text(f"  {c.name}: {warning}", style="yellow"))
+    for warning in plan.warnings:
+        style = "bold red" if warning.startswith("REAL VEHICLE") else "yellow"
+        console.print(Text(f"! {warning}", style=style))
+
+
+def render_plan_saved(plan: ChangePlan) -> None:
+    render_plan(plan)
+    if plan.blocked:
+        err.print(Text("This plan is blocked and cannot be approved.", style="bold red"))
+        return
+    out.print(Text(f"Plan {plan.plan_id} saved. Review it, then:"))
+    out.print(Text(f"  mavforge approve {plan.plan_id}"))
+    out.print(Text(f"  mavforge -c <connection> params apply {plan.plan_id}"))
+
+
+_OUTCOME_STYLE = {
+    ChangeOutcome.VERIFIED: "green",
+    ChangeOutcome.UNCHANGED: "dim",
+    ChangeOutcome.FAILED: "bold red",
+    ChangeOutcome.UNKNOWN: "bold yellow",
+    ChangeOutcome.SKIPPED: "yellow",
+    ChangeOutcome.NOT_ATTEMPTED: "yellow",
+}
+
+
+def render_apply(r: ApplyResult) -> None:
+    table = Table(box=None, pad_edge=False)
+    for column in ("Parameter", "Before", "Requested", "After", "Result", "Detail"):
+        table.add_column(column)
+    for c in r.changes:
+        table.add_row(
+            Text(c.name, style="bold"),
+            format_value(c.before) if c.before is not None else "?",
+            format_value(c.requested),
+            format_value(c.after) if c.after is not None else "?",
+            Text(c.outcome.value, style=_OUTCOME_STYLE[c.outcome]),
+            c.detail or "",
+        )
+    out.print(table)
+    out.print(
+        Text(
+            f"Result: {r.status.value} (plan {r.plan_id}, approved via {r.approved_by})",
+            style="bold",
+        )
+    )
+    if r.pre_change_backup:
+        out.print(Text(f"Backup taken before the change: {r.pre_change_backup}"))
+        out.print(
+            Text(
+                f"  undo with: mavforge -c <connection> params restore {r.pre_change_backup}",
+                style="dim",
+            )
+        )
+    if r.reboot_required:
+        out.print(
+            Text(
+                f"Reboot the vehicle for these to take effect: {', '.join(r.reboot_required)}",
+                style="yellow",
+            )
+        )
+    for warning in r.warnings:
+        err.print(Text(f"warning: {warning}", style="yellow"))
+
+
+def render_plans(r: PlanListResult) -> None:
+    if not r.plans:
+        out.print("No change plans.")
+        return
+    table = Table(box=None, pad_edge=False)
+    for column in ("Plan", "Created (UTC)", "Kind", "Vehicle", "Changes", "State"):
+        table.add_column(column)
+    for p in r.plans:
+        state = (
+            "applied"
+            if p.applied
+            else "blocked"
+            if p.blocked
+            else "approved"
+            if p.approved
+            else "pending"
+        )
+        table.add_row(
+            p.plan_id,
+            f"{p.created_at:%Y-%m-%d %H:%M:%S}",
+            p.kind,
+            p.vehicle,
+            str(p.change_count),
+            state,
+        )
+    out.print(table)
+
+
+def _confirm_and_approve(plan: ChangePlan, yes: bool) -> None:
+    """Show the plan and record the human's approval, or raise NotApprovedError."""
+    render_plan(plan)
+    if plan.blocked:
+        raise NotApprovedError(f"Plan {plan.plan_id} has blocking issues; nothing was changed")
+    if all(c.no_change for c in plan.changes):
+        raise NotApprovedError("Every requested value is already set; nothing to change")
+    if not yes:
+        count = sum(not c.no_change for c in plan.changes)
+        real = plan.vehicle.simulated is not True
+        question = f"Write {count} parameter(s) to the {'REAL ' if real else ''}vehicle?"
+        try:
+            confirmed = typer.confirm(question, default=False, err=True)
+        except typer.Abort:
+            confirmed = False
+        if not confirmed:
+            raise NotApprovedError(f"Plan {plan.plan_id} was not approved; nothing was changed")
+    mavforge.approve_plan(plan, approved_by="cli-yes-flag" if yes else "cli-prompt")
+
+
 def render_capabilities(r: CapabilitiesResult) -> None:
     table = Table(title=f"MAVForge {r.mavforge_version}", title_justify="left")
     table.add_column("Operation")
@@ -566,6 +727,131 @@ def params_diff(
     if against is not None:
         _offline(ctx, lambda: mavforge.diff_backups(baseline, against), render)
     _with_vehicle(ctx, lambda v: v.params.diff(baseline), render)
+
+
+_WRITE_POLICY = Policy.configure(allow_real_vehicle=True)
+"""CLI write commands act for the human at the terminal, who reviews and confirms every
+plan (marked REAL VEHICLE when applicable) before anything is written."""
+
+
+@params_app.command("set")
+def params_set(
+    ctx: typer.Context,
+    assignments: Annotated[list[str], typer.Argument(help="One or more NAME=VALUE.")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Approve without prompting.")] = False,
+    allow_out_of_range: Annotated[
+        bool, typer.Option(help="Allow values outside the documented range or value list.")
+    ] = False,
+    offline: Annotated[bool, typer.Option(help="Do not download parameter metadata.")] = False,
+) -> None:
+    """Change parameters: show the plan, ask for approval, write and verify each value."""
+    requested = _parse_or_fail(ctx, assignments)
+
+    def act(vehicle: mavforge.Vehicle) -> ApplyResult:
+        plan = vehicle.params.plan(
+            requested, allow_out_of_range=allow_out_of_range, offline=offline
+        )
+        _confirm_and_approve(plan, yes)
+        return vehicle.params.apply(plan)
+
+    _with_vehicle(ctx, act, render_apply, policy=_WRITE_POLICY)
+
+
+@params_app.command("plan")
+def params_plan(
+    ctx: typer.Context,
+    assignments: Annotated[list[str], typer.Argument(help="One or more NAME=VALUE.")],
+    allow_out_of_range: Annotated[
+        bool, typer.Option(help="Allow values outside the documented range or value list.")
+    ] = False,
+    offline: Annotated[bool, typer.Option(help="Do not download parameter metadata.")] = False,
+) -> None:
+    """Validate changes and save a plan for later approval and apply (changes nothing)."""
+    requested = _parse_or_fail(ctx, assignments)
+    _with_vehicle(
+        ctx,
+        lambda v: v.params.plan(requested, allow_out_of_range=allow_out_of_range, offline=offline),
+        render_plan_saved,
+    )
+
+
+@params_app.command("restore")
+def params_restore(
+    ctx: typer.Context,
+    backup: Annotated[str, typer.Argument(help="Backup id, MAVForge JSON backup, or .param file.")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Approve without prompting.")] = False,
+    allow_mismatch: Annotated[
+        bool,
+        typer.Option(help="Restore even if the backup's vehicle/firmware differs (dangerous)."),
+    ] = False,
+    offline: Annotated[bool, typer.Option(help="Do not download parameter metadata.")] = False,
+) -> None:
+    """Write back every non-volatile value that differs from a backup, then verify."""
+
+    def act(vehicle: mavforge.Vehicle) -> ApplyResult:
+        plan = vehicle.params.plan_restore(backup, allow_mismatch=allow_mismatch, offline=offline)
+        _confirm_and_approve(plan, yes)
+        return vehicle.params.apply(plan)
+
+    _with_vehicle(ctx, act, render_apply, policy=_WRITE_POLICY)
+
+
+@params_app.command("apply")
+def params_apply(
+    ctx: typer.Context,
+    plan_ref: Annotated[str, typer.Argument(metavar="PLAN", help="Plan id or plan file.")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Approve without prompting.")] = False,
+) -> None:
+    """Apply a saved plan (asks for approval unless it was already approved)."""
+
+    def act(vehicle: mavforge.Vehicle) -> ApplyResult:
+        plan = mavforge.load_plan(plan_ref)
+        if not _is_approved(plan):
+            _confirm_and_approve(plan, yes)
+        return vehicle.params.apply(plan)
+
+    _with_vehicle(ctx, act, render_apply, policy=_WRITE_POLICY)
+
+
+@params_app.command("plans")
+def params_plans(ctx: typer.Context) -> None:
+    """List change plans and whether they are pending, approved or applied."""
+    _offline(ctx, mavforge.list_plans, render_plans)
+
+
+@app.command()
+def approve(
+    ctx: typer.Context,
+    plan_ref: Annotated[str, typer.Argument(metavar="PLAN", help="Plan id or plan file.")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Approve without prompting.")] = False,
+) -> None:
+    """Review and approve a change plan, e.g. one proposed by an AI agent over MCP.
+
+    The approval is bound to that exact plan and expires after 10 minutes.
+    """
+
+    def act() -> ChangePlan:
+        plan = mavforge.load_plan(plan_ref)
+        _confirm_and_approve(plan, yes)
+        out.print(Text(f"Approved plan {plan.plan_id} (valid for 10 minutes).", style="green"))
+        return plan
+
+    _offline(ctx, act, lambda _: None)
+
+
+def _is_approved(plan: ChangePlan) -> bool:
+    from mavforge.services.plan_store import valid_approval
+
+    return valid_approval(plan) is not None
+
+
+def _parse_or_fail(ctx: typer.Context, assignments: list[str]) -> dict[str, float]:
+    from mavforge.services.changes import parse_assignments
+
+    try:
+        return parse_assignments(assignments)
+    except MAVForgeError as exc:
+        _fail(ctx.obj, exc)
 
 
 def main() -> None:

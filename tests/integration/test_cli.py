@@ -161,3 +161,55 @@ def test_diagnose_fail_on_passes_for_clean_vehicle(fake: FakeVehicle) -> None:
         "-c", fake.connection_string, "diagnose", "--prearm-wait", "0.5", "--fail-on", "warning"
     )
     assert code == ExitCode.OK
+
+
+def test_params_set_prompts_and_writes_only_when_confirmed(fake: FakeVehicle) -> None:
+    args = ["-c", fake.connection_string, "params", "set", "RC1_TRIM=1490"]
+    declined = runner.invoke(app, args, input="n\n", env={"MAVFORGE_CONNECTION": None})
+    assert declined.exit_code == ExitCode.FAILED
+    assert "not approved" in declined.stderr
+    assert "RC1_TRIM" in declined.stderr  # the plan was shown before asking
+    accepted = runner.invoke(app, args, input="y\n", env={"MAVFORGE_CONNECTION": None})
+    assert accepted.exit_code == ExitCode.OK, accepted.output
+    assert "verified" in accepted.stdout
+    assert "params restore" in accepted.stdout  # tells the user how to undo
+
+
+def test_plan_then_approve_then_apply(fake: FakeVehicle) -> None:
+    code, stdout, _ = invoke(
+        "-c", fake.connection_string, "--json", "params", "plan", "RC1_TRIM=1490"
+    )
+    assert code == ExitCode.OK
+    plan_id = json.loads(stdout)["plan_id"]
+    assert invoke("approve", plan_id, "--yes")[0] == ExitCode.OK
+    code, stdout, _ = invoke("--json", "params", "plans")
+    assert json.loads(stdout)["plans"][0]["approved"] is True
+    code, stdout, _ = invoke("-c", fake.connection_string, "--json", "params", "apply", plan_id)
+    assert code == ExitCode.OK
+    assert json.loads(stdout)["changes"][0]["outcome"] == "verified"
+
+
+def test_blocked_plan_exits_without_writing(fake: FakeVehicle) -> None:
+    code, _, stderr = invoke("-c", fake.connection_string, "params", "set", "MAV_SYSID=7", "--yes")
+    assert code == ExitCode.FAILED
+    assert "blocking issues" in stderr
+    assert not any(m.get_type() == "PARAM_SET" for m in fake.received)
+
+
+def test_restore_via_cli(fake: FakeVehicle) -> None:
+    code, stdout, _ = invoke(
+        "-c", fake.connection_string, "--json", "params", "set", "RC1_TRIM=1490", "-y"
+    )
+    backup = json.loads(stdout)["pre_change_backup"]
+    code, stdout, _ = invoke(
+        "-c", fake.connection_string, "--json", "params", "restore", backup, "-y"
+    )
+    assert code == ExitCode.OK
+    assert json.loads(stdout)["changes"][0] == {
+        "name": "RC1_TRIM",
+        "before": 1490,
+        "requested": 1500,
+        "after": 1500,
+        "outcome": "verified",
+        "detail": "Verified by read back",
+    }

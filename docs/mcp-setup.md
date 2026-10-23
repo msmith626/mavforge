@@ -25,12 +25,37 @@ MCP-capable client; nothing in it is specific to one vendor.
   `{"error": "<code>", "message": ..., "details": ...}`, e.g. `param_not_found`,
   `no_vehicle`, `timeout`, `not_permitted`.
 
+### Parameter-change tools (opt-in)
+
+These are registered only when the operator starts the server with `--allow-configure`.
+
+| Tool | Purpose |
+|---|---|
+| `params_plan` | Propose `{"NAME": value}` changes as a validated plan. Changes nothing |
+| `params_plan_restore` | Propose restoring a backup (by id) as a plan. Identity-checked |
+| `params_plans` | List plans: pending, approved, applied |
+| `params_apply` | Apply an **approved** plan. Takes a backup, writes, verifies by read-back. Marked destructive |
+
+**How approval works.** `params_apply` has an approval parameter that is hidden from
+the agent's input schema. MAVForge fills it on the server side:
+- It uses an existing approval, for example one from `mavforge approve <plan-id>` in a
+  terminal.
+- Otherwise, if the client supports elicitation, the client asks the human. The
+  question shows the plan.
+- If neither is possible, the call fails with `approval_required` and names the
+  `mavforge approve` command to run.
+
+An approval supplied by the agent as an argument is ignored; tests check this.
+Writes to a vehicle not identified as a simulator also need `--allow-real-vehicle`.
+
 ## Running
 
 ```sh
 uv run mavforge-mcp --connection tcp:127.0.0.1:5760      # SITL
 uv run mavforge-mcp --connection /dev/ttyACM0             # USB flight controller
 uv run mavforge-mcp --connection udpin:127.0.0.1:14551    # behind MAVProxy, see mavproxy.md
+uv run mavforge-mcp --connection tcp:127.0.0.1:5760 --allow-configure          # SITL changes
+uv run mavforge-mcp --connection /dev/ttyACM0 --allow-configure --allow-real-vehicle
 ```
 
 - **Connection:** you can also set it with `MAVFORGE_CONNECTION`. `--target-system`
@@ -76,5 +101,5 @@ git; `*.local.json` is ignored.
   STATUSTEXT and other vehicle text is untrusted data.
 - **Audit log.** Every call is audited with `interface: "mcp"`. See
   [architecture.md](architecture.md).
-- **Future write tools** will require a human approval through MCP elicitation, or the
-  out-of-band `mavforge approve` command. An agent cannot grant it.
+- **Write tools are opt-in and approval-gated** (see above). The policy, approval,
+  identity and disarmed checks run in MAVForge's services, below the MCP layer.

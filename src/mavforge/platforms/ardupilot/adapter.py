@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from fnmatch import fnmatchcase
 
+from mavforge.domain.models import VehicleIdentity
+from mavforge.platforms.ardupilot.metadata import load_metadata
 from mavforge.platforms.ardupilot.rules import RULES
 from mavforge.platforms.base import Capability, PlatformAdapter
+from mavforge.platforms.metadata import MetadataSet
 from mavforge.platforms.rules import ParamRule
 from mavforge.transport.dialect import mavlink, mavutil
 
@@ -56,6 +60,16 @@ _VOLATILE_PATTERNS = (
 )
 
 
+_SERIAL_LINK_RE = re.compile(r"^SERIAL\d+_(PROTOCOL|BAUD)$")
+_OUTPUT_FUNCTION_RE = re.compile(r"^SERVO\d+_FUNCTION$")
+_DISABLE_MEANS_NO_FAILSAFE = {
+    "THR_FAILSAFE": "the RC/throttle failsafe",
+    "FS_THR_ENABLE": "the RC/throttle failsafe",
+    "BATT_FS_LOW_ACT": "the low-battery failsafe action",
+    "BATT_FS_CRT_ACT": "the critical-battery failsafe action",
+}
+
+
 class ArduPilotAdapter(PlatformAdapter):
     name = "ardupilot"
     capabilities = frozenset({Capability.IDENTIFY, Capability.STATUS, Capability.PARAM_READ})
@@ -79,6 +93,43 @@ class ArduPilotAdapter(PlatformAdapter):
 
     def param_rules(self) -> Sequence[ParamRule]:
         return RULES
+
+    def param_metadata(
+        self, identity: VehicleIdentity, *, offline: bool
+    ) -> tuple[MetadataSet | None, str]:
+        return load_metadata(identity, offline=offline)
+
+    def change_notes(
+        self, name: str, current: float | int, requested: float | int
+    ) -> tuple[list[str], list[str]]:
+        issues: list[str] = []
+        warnings: list[str] = []
+        if name in ("MAV_SYSID", "SYSID_THISMAV"):
+            issues.append(
+                "Changing the vehicle's MAVLink system ID would break the connection in the "
+                "middle of the change; MAVForge does not support it yet."
+            )
+        if name == "FORMAT_VERSION":
+            issues.append("Changing FORMAT_VERSION makes ArduPilot reset all parameters.")
+        if name == "ARMING_CHECK" and int(requested) & 1 == 0 and int(current) & 1:
+            warnings.append("This disables some or all pre-arm safety checks.")
+        if name == "ARMING_CHECK" and int(requested) == 0:
+            warnings.append("ARMING_CHECK=0 disables all pre-arm safety checks.")
+        if name == "ARMING_SKIPCHK" and int(requested) != 0:
+            warnings.append("This makes the firmware skip some pre-arm safety checks.")
+        if name in _DISABLE_MEANS_NO_FAILSAFE and requested == 0 and current != 0:
+            warnings.append(f"This disables {_DISABLE_MEANS_NO_FAILSAFE[name]}.")
+        if _SERIAL_LINK_RE.match(name):
+            warnings.append(
+                "Changing a serial port's protocol or baud rate can cut off a telemetry link, "
+                "including the one MAVForge may be using; takes effect after reboot."
+            )
+        if _OUTPUT_FUNCTION_RE.match(name):
+            warnings.append(
+                "Changes which output drives which motor or control surface. Check movement "
+                "with propellers removed before flight."
+            )
+        return issues, warnings
 
     def is_volatile_param(self, name: str) -> bool:
         return any(fnmatchcase(name, pattern) for pattern in _VOLATILE_PATTERNS)

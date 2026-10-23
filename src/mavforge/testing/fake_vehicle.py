@@ -112,6 +112,18 @@ class FakeVehicleConfig:
     statustext_on_connect: list[str] = field(default_factory=list[str])
     sensors_unhealthy: int = 0
     prearm_passing: bool = True
+    param_write_errors: dict[str, int] = field(default_factory=dict[str, int])
+    """PARAM_SET for these names is answered with PARAM_ERROR(code) and not applied."""
+    param_constraints: dict[str, tuple[float, float]] = field(
+        default_factory=dict[str, tuple[float, float]]
+    )
+    """Written values are clamped to these ranges, as ArduPilot does for some params."""
+    ignore_param_set: set[str] = field(default_factory=set[str])
+    """PARAM_SET for these names gets no reply and changes nothing."""
+    no_echo_param_set: set[str] = field(default_factory=set[str])
+    """PARAM_SET for these names is applied but not echoed."""
+    drop_link_after_sets: int | None = None
+    """Close the connection right after this many applied PARAM_SETs (link loss)."""
     uptime_s: float = 600.0
     """Seconds since 'boot' reported in SYSTEM_TIME when the fake starts."""
     prearm_failures: list[str] = field(default_factory=list[str])
@@ -148,6 +160,7 @@ class FakeVehicle:
         self._lock = threading.Lock()
         self._received: list[Message] = []
         self._param_list_requests = 0
+        self._sets_applied = 0
         self._clients: list[socket.socket] = []
         self._threads: list[threading.Thread] = []
         self._accept_thread = threading.Thread(target=self._accept_loop, daemon=True)
@@ -361,6 +374,8 @@ class FakeVehicle:
             self._handle_param_list(mav)
         elif isinstance(msg, mavlink.MAVLink_param_request_read_message):
             self._handle_param_read(mav, msg)
+        elif isinstance(msg, mavlink.MAVLink_param_set_message):
+            self._handle_param_set(mav, msg)
 
     def _handle_command(
         self, mav: mavlink.MAVLink, msg: mavlink.MAVLink_command_long_message
@@ -408,6 +423,37 @@ class FakeVehicle:
             if index in self.config.withheld_param_indices:
                 continue
             self._param_value(mav, name, spec, index, len(params))
+
+    def _handle_param_set(
+        self, mav: mavlink.MAVLink, msg: mavlink.MAVLink_param_set_message
+    ) -> None:
+        cfg = self.config
+        name = str(msg.param_id).rstrip("\x00")
+        if name in cfg.ignore_param_set:
+            return
+        if name in cfg.param_write_errors or name not in dict(self._param_snapshot()):
+            code = cfg.param_write_errors.get(name, mavlink.MAV_PARAM_ERROR_DOES_NOT_EXIST)
+            mav.param_error_send(
+                msg.get_srcSystem(), msg.get_srcComponent(), name.encode(), -1, code
+            )
+            return
+        value = float(msg.param_value)
+        if name in cfg.param_constraints:
+            lo, hi = cfg.param_constraints[name]
+            value = min(max(value, lo), hi)
+        with self._lock:
+            _, ptype = self.config.params[name]  # ArduPilot keeps the stored type
+            self.config.params[name] = (value, ptype)
+            self._sets_applied += 1
+            drop = (
+                cfg.drop_link_after_sets is not None
+                and self._sets_applied >= cfg.drop_link_after_sets
+            )
+        if name not in cfg.no_echo_param_set:
+            # Like AP_Param::save -> GCS_SEND_PARAM: broadcast with index 65535
+            self._param_value(mav, name, (value, ptype), 65535, len(self._param_snapshot()))
+        if drop:
+            raise ConnectionAbortedError("fake vehicle dropped the link")
 
     def _handle_param_read(
         self, mav: mavlink.MAVLink, msg: mavlink.MAVLink_param_request_read_message

@@ -17,6 +17,8 @@ from mavforge.domain.errors import InvalidInputError
 from mavforge.transport.dialect import mavlink
 
 if TYPE_CHECKING:
+    from mavforge.domain.models import VehicleIdentity
+    from mavforge.platforms.metadata import MetadataSet
     from mavforge.platforms.rules import ParamRule
 
 _PARAM_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,16}$")
@@ -50,6 +52,18 @@ class PlatformAdapter(ABC):
     def param_rules(self) -> Sequence[ParamRule]:
         """Platform-specific configuration rules used by diagnostics."""
         return ()
+
+    def param_metadata(
+        self, identity: VehicleIdentity, *, offline: bool
+    ) -> tuple[MetadataSet | None, str]:
+        """Parameter definitions for this vehicle, and a note on their provenance."""
+        return None, f"No parameter metadata source for the {self.name} platform."
+
+    def change_notes(
+        self, name: str, current: float | int, requested: float | int
+    ) -> tuple[list[str], list[str]]:
+        """(blocking issues, warnings) specific to changing ``name`` on this platform."""
+        return [], []
 
     def is_volatile_param(self, name: str) -> bool:
         """True for parameters the firmware changes on its own (counters, boot-time

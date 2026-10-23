@@ -52,13 +52,13 @@ def describe_vehicle(identity: VehicleIdentity | None) -> str:
     return f"system {identity.system_id} {identity.autopilot} {identity.mav_type}{family}{firmware}"
 
 
-def _default_backup_stem(identity: VehicleIdentity, created: datetime) -> str:
+def default_backup_stem(identity: VehicleIdentity, created: datetime) -> str:
     kind = identity.vehicle_family or identity.mav_type.lower()
     firmware = str(identity.firmware) if identity.firmware else "unknown"
     return f"{created:%Y%m%dT%H%M%SZ}-sys{identity.system_id}-{kind}-{firmware}"
 
 
-def _write_new_default(stem: str, text: str) -> Path:
+def write_new_default(stem: str, text: str) -> Path:
     """Write to the backup directory under ``stem``, adding -2, -3... if taken."""
     for n in range(1, 100):
         path = backup_dir() / (f"{stem}.json" if n == 1 else f"{stem}-{n}.json")
@@ -125,8 +125,8 @@ def create_backup(
         backup = build_backup(session)
         text = backup.model_dump_json(indent=2) + "\n"
         if path is None:
-            target = _write_new_default(
-                _default_backup_stem(session.identity, backup.created_at), text
+            target = write_new_default(
+                default_backup_stem(session.identity, backup.created_at), text
             )
         else:
             target = path

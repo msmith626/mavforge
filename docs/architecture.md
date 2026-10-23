@@ -56,14 +56,38 @@
 
 ## Safety and permission model
 
-- **Permission tiers.** `Permission` has four tiers: `read` (the default), and
-  `configure`, `calibrate` and `maintenance`, which are reserved. There is deliberately
-  no tier for arming or flight.
-- **Future writes.** Write operations (Phase 2+) will use plan → approve → apply:
-  - Approval tokens will be bound to the plan's hash and the vehicle's identity, and
-    issued only through a human channel: MCP elicitation or `mavforge approve`. An
-    agent setting `confirm=true` will never count.
-  - Writes to non-SITL vehicles will also need an explicit operator flag.
+- **Permission tiers.** `Permission` has four tiers:
+  - `read` (the default).
+  - `configure`: parameter changes.
+  - `calibrate` and `maintenance`: reserved.
+
+  There is deliberately no tier for arming or flight. `Policy.allow_real_vehicle`
+  (default off) gates every modifying operation on vehicles not identified as SITL.
+- **Parameter changes** (`services/changes.py`, `services/plan_store.py`):
+  1. **Plan.** Reads current values, then validates type, integer bounds, and the
+     metadata for the vehicle's exact firmware: range, documented values, read-only.
+     Records adapter safety notes (disabling failsafes or arming checks, serial
+     ports, output functions). Some changes are blocked outright: system ID and
+     `FORMAT_VERSION`. The plan is saved immutably, with its id taken from the
+     SHA-256 of its content.
+  2. **Approve.** The approval names the plan's digest and lasts 10 minutes. It can only
+     come from a human-facing path: the CLI prompt or `--yes`, `mavforge approve`, MCP
+     elicitation (through a resolver parameter hidden from the agent), or a Python caller.
+  3. **Apply** re-checks every gate below all interfaces, in this order:
+     - the `configure` policy and the real-vehicle flag;
+     - the plan is unblocked and has a valid approval;
+     - the vehicle is the same: system and component ID, autopilot, firmware, board UID;
+     - the vehicle is disarmed;
+     - an `apply_started` audit record is written; if it can't be, nothing is written
+       (fail closed).
+
+     It then consumes the plan (an atomic exclusive file create makes it single-use)
+     and backs up all parameters. Each value is checked for drift since planning (if it
+     changed, that parameter is skipped), written with `PARAM_SET`, and verified by
+     reading it back. A lost link marks the change in flight `unknown` and the rest
+     `not_attempted`.
+  4. **Restore** is a plan built from a backup's non-volatile differences. It is refused
+     if the backup's identity or firmware doesn't match, unless explicitly overridden.
 - **Untrusted vehicle text.**
   - The CLI renders vehicle-originated text inertly: no rich markup, and control
     characters are replaced.
@@ -71,8 +95,9 @@
 - **Audit log.**
   - Location: `$MAVFORGE_STATE_DIR` or `$XDG_STATE_HOME/mavforge/audit.jsonl`.
   - The file is created with mode 0600 and credentials are redacted.
-  - If a read-only operation can't write its audit entry, it logs a warning.
-    Operations that modify the vehicle will fail instead (fail closed).
+  - Audit failures before a write block the write (fail closed). After the writes, an
+    audit failure never hides the outcome: it is logged and added to the result as a
+    warning.
 
 ## Extending
 

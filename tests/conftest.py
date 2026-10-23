@@ -17,6 +17,22 @@ def isolated_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return state
 
 
+SAMPLE_METADATA = (Path(__file__).parent / "fixtures" / "apm.pdef.sample.xml").read_bytes()
+
+
+@pytest.fixture(autouse=True)
+def no_network_metadata(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve the sample apm.pdef.xml instead of downloading (except SITL/hardware tests)."""
+    if request.node.get_closest_marker("sitl") or request.node.get_closest_marker("hardware"):
+        return
+    from mavforge.platforms.ardupilot import metadata
+
+    def sample_fetcher(url: str) -> bytes:
+        return SAMPLE_METADATA
+
+    monkeypatch.setattr(metadata, "default_fetcher", sample_fetcher)
+
+
 @pytest.fixture
 def make_fake() -> Iterator[FakeFactory]:
     fakes: list[FakeVehicle] = []

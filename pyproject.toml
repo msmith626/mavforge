@@ -26,6 +26,7 @@ dependencies = [
     "rich>=14",
     "mcp>=2.3,<3",
     "pyserial>=3.5,<4",
+    "defusedxml>=0.7.1,<1",
 ]
 
 [project.scripts]
