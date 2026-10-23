@@ -22,9 +22,9 @@ from mavforge.transport.dialect import mavlink
 pytestmark = [pytest.mark.sitl, pytest.mark.timeout(180)]
 
 SIM_ONLY = Policy.configure(allow_real_vehicle=False)
-LOW = (1104, 1096, 1092, 1108)
-HIGH = (1892, 1904, 1910, 1888)
-CENTRE = (1502, 1497, 1093, 1499)
+LOW = (1080, 1076, 1072, 1084)  # all more than TOLERANCE us from the SITL defaults
+HIGH = (1916, 1924, 1930, 1912)
+CENTRE = (1510, 1490, 1074, 1508)
 IGNORE = 65535  # RC_CHANNELS_OVERRIDE: leave this channel alone
 
 

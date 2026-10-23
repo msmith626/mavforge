@@ -16,6 +16,7 @@ Deliberate differences from Mission Planner (see docs/research.md):
 - Channels that did not move are reported, not silently skipped.
 - Roll, pitch and yaw must be centred, and the throttle low, when trims are captured.
   Mission Planner captures whatever the sticks show.
+- A value within TOLERANCE us of the current one is left as it is.
 """
 
 from __future__ import annotations
@@ -52,6 +53,10 @@ CENTRE_BAND = 0.2
 """Roll/pitch/yaw trim must lie within this fraction of the travel from the midpoint."""
 LOW_BAND = 0.1
 """Throttle trim must lie within this fraction of the travel from its low end."""
+TOLERANCE = 3
+"""A measured value within this many us of the current one keeps the current value, so a
+radio that is already calibrated gets no changes for sampling noise (MAVForge's choice;
+Mission Planner writes every value)."""
 ROLES = ("ROLL", "PITCH", "THROTTLE", "YAW")
 NO_CHANNEL = 65535  # RC_CHANNELS: UINT16_MAX marks an unused channel
 
@@ -322,6 +327,26 @@ class RadioWorkflow(Workflow):
                     f"RC{number}_MAX": span[1],
                     f"RC{number}_TRIM": trims[number],
                 }
+        current = ctx.read_params(list(requested))
+        kept: list[str] = []
+        for number in sorted(trims):
+            names = [f"RC{number}_{s}" for s in ("MIN", "MAX", "TRIM")]
+            measured = [requested[n] for n in names]
+            for name in names:
+                if name in current and abs(current[name] - requested[name]) <= TOLERANCE:
+                    requested[name] = int(current[name])
+            low, high, trim = (requested[n] for n in names)
+            if not low <= trim <= high:  # keeping the old trim must not put it outside the range
+                requested[names[2]] = measured[2]
+            kept += [
+                f"{n} {requested[n]} (measured {m})"
+                for n, m in zip(names, measured, strict=True)
+                if requested[n] != m
+            ]
+        if kept:
+            evidence.append(
+                f"Within {TOLERANCE} us of the current value, kept as is: {', '.join(kept)}"
+            )
         unmoved = [c.channel for c in channels.values() if not c.moved]
         warnings = (
             [

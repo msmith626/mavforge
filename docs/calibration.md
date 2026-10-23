@@ -185,7 +185,11 @@ plan goes through the normal approve → apply → read-back path.
      `RCn_REVERSED=1`.
    - If any check fails, the result is `failed` and no plan is made.
 5. **Plan.** Every moved channel gets min/max/trim in a change plan. Channels that
-   didn't move are listed and left unchanged.
+   didn't move are listed and left unchanged. A measured value within 3 µs of the
+   current one keeps the current value (listed in the evidence), unless keeping an old
+   trim would put it outside the new min..max. So a radio that is already calibrated
+   gets no changes and no writes for sampling noise. Mission Planner writes every
+   value; on the hardware run, all four changes it would have made were 1–2 µs.
 
 **Success:** a `succeeded` result means the sweep was usable and a plan was recorded
 (`result.plan`). It does **not** mean anything was written. The values reach the

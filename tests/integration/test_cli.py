@@ -295,10 +295,10 @@ def _person_at_transmitter(fake: FakeVehicle, gate: threading.Event) -> None:
     deadline = time.monotonic() + 10
     while rc_requests() < 3 and time.monotonic() < deadline:
         time.sleep(0.05)
-    for frame in ((1102, 1098, 1095, 1104), (1895, 1901, 1906, 1893)):
+    for frame in ((1080, 1078, 1075, 1084), (1915, 1921, 1926, 1913)):
         fake.set_rc(*frame)
         time.sleep(0.3)
-    fake.set_rc(1498, 1501, 1096, 1502)
+    fake.set_rc(1510, 1513, 1076, 1490)
     gate.set()
 
 
@@ -347,7 +347,7 @@ def test_calibrate_radio_cli_sweeps_then_applies_after_approval(
     assert "cancel):" not in result.stderr
     assert "Write 12 parameter(s)" in result.stderr
     assert "verified" in result.stdout
-    assert fake.config.params["RC3_MAX"][0] == 1906
+    assert fake.config.params["RC3_MAX"][0] == 1926
 
 
 def test_calibrate_radio_plan_only_json_writes_nothing(

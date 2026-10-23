@@ -20,9 +20,10 @@ from mavforge.transport.dialect import mavlink
 CONFIGURE = Policy.configure(allow_real_vehicle=False)
 
 # The person at the transmitter: sticks to every limit, then centred with throttle down.
-LOW = (1102, 1098, 1095, 1104)
-HIGH = (1895, 1901, 1906, 1893)
-CENTRE = (1498, 1501, 1096, 1502)
+# More than TOLERANCE us from the fake's stored RCn values, so every value is a change.
+LOW = (1080, 1078, 1075, 1084)
+HIGH = (1915, 1921, 1926, 1913)
+CENTRE = (1510, 1513, 1076, 1490)
 SWEEP: list[Sequence[int]] = [LOW, HIGH, LOW, HIGH]
 
 
@@ -72,10 +73,10 @@ def test_sweep_proposes_a_plan_and_writes_nothing(fake: FakeVehicle) -> None:
     assert not plan.blocked
     requested = {c.name: c.requested for c in plan.changes}
     assert requested == {
-        "RC1_MIN": 1102, "RC1_MAX": 1895, "RC1_TRIM": 1498,
-        "RC2_MIN": 1098, "RC2_MAX": 1901, "RC2_TRIM": 1501,
-        "RC3_MIN": 1095, "RC3_MAX": 1906, "RC3_TRIM": 1096,
-        "RC4_MIN": 1104, "RC4_MAX": 1893, "RC4_TRIM": 1502,
+        "RC1_MIN": 1080, "RC1_MAX": 1915, "RC1_TRIM": 1510,
+        "RC2_MIN": 1078, "RC2_MAX": 1921, "RC2_TRIM": 1513,
+        "RC3_MIN": 1075, "RC3_MAX": 1926, "RC3_TRIM": 1076,
+        "RC4_MIN": 1084, "RC4_MAX": 1913, "RC4_TRIM": 1490,
     }  # fmt: skip
     assert "needs approval" in st.result.summary
     assert any("RC5, RC6, RC7, RC8" in w for w in st.result.warnings)
@@ -94,7 +95,7 @@ def test_plan_applies_only_after_approval(fake: FakeVehicle) -> None:
         mavforge.approve_plan(plan, approved_by="test")
         result = vehicle.params.apply(plan)
         assert result.status is OperationStatus.SUCCEEDED
-        assert vehicle.params.get("RC3_MAX").param.value == 1906
+        assert vehicle.params.get("RC3_MAX").param.value == 1926
 
 
 def test_switch_channel_is_included_when_swept(fake: FakeVehicle) -> None:
@@ -107,6 +108,34 @@ def test_switch_channel_is_included_when_swept(fake: FakeVehicle) -> None:
     assert st.result.plan is not None
     requested = {c.name: c.requested for c in st.result.plan.changes}
     assert (requested["RC5_MIN"], requested["RC5_MAX"], requested["RC5_TRIM"]) == (1000, 2000, 2000)
+
+
+def test_already_calibrated_radio_proposes_no_changes(fake: FakeVehicle) -> None:
+    # within TOLERANCE of the fake's stored values: RC1 1100/1900/1500, RC2 1101/1899/1502,
+    # RC3 1098/1902/1098, RC4 1103/1897/1499
+    low, high = (1102, 1099, 1095, 1104), (1897, 1901, 1905, 1894)
+    with mavforge.connect(fake.connection_string, policy=CONFIGURE) as vehicle:
+        st = run(vehicle, fake, sweep=[low, high, low], centre=(1498, 1504, 1100, 1497))
+    assert st.state is CalibrationState.SUCCEEDED, st.result
+    assert st.result is not None
+    assert st.result.plan is not None
+    assert all(c.no_change for c in st.result.plan.changes)
+    assert "already has these values" in st.result.summary
+    assert any("RC1_MIN 1100 (measured 1102)" in e for e in st.result.evidence)
+
+
+def test_kept_trim_never_falls_outside_the_new_range(fake: FakeVehicle) -> None:
+    # RC3_MIN moves up from 1050 to 1095; keeping the old trim (1094, within tolerance of
+    # the measured 1096) would put it below the new minimum, so the measured trim is used.
+    fake.set_param("RC3_MIN", 1050, ParamType.INT16)
+    fake.set_param("RC3_TRIM", 1094, ParamType.INT16)
+    sweep = [(1080, 1078, 1095, 1084), (1915, 1921, 1926, 1913)]
+    with mavforge.connect(fake.connection_string, policy=CONFIGURE) as vehicle:
+        st = run(vehicle, fake, sweep=sweep, centre=(1510, 1513, 1096, 1490))
+    assert st.result is not None
+    assert st.result.plan is not None
+    requested = {c.name: c.requested for c in st.result.plan.changes}
+    assert (requested["RC3_MIN"], requested["RC3_TRIM"]) == (1095, 1096)
 
 
 def test_jitter_on_an_unused_channel_is_not_movement(fake: FakeVehicle) -> None:
