@@ -58,7 +58,7 @@ needs a reboot, the result says so.
 |---|---|---|---|---|---|
 | Gyro | yes | success + failure | **passed** | not yet | yes |
 | Level (AHRS trim) | yes | success + rejected | **passed** | not yet | yes |
-| Compass (onboard) | yes, if `COMPASS_CALIBRATION` capability | success (1 and 3 compasses), per-compass failure, accept-without-save, cancel, timeout | **passed** (3 compasses, `calibration` model) | not yet | yes |
+| Compass (onboard) | yes, if `COMPASS_CALIBRATION` capability | success (1 and 3 compasses), per-compass failure, accept-without-save, cancel, timeout | **passed** (3 compasses, `calibration` model) | **passed**: ArduPlane 4.6.2, 1 compass, USB power only (2026-10-23) | yes |
 | Accelerometer, 6 positions | yes | success, failure, silence, cancel | **passed** (`calibration` model) | not yet | **no** |
 
 Other autopilots use the generic adapter, which declares no calibrations.

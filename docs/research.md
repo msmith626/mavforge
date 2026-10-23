@@ -233,3 +233,8 @@ These were checked against ArduCopter 4.7.2 SITL. The source was read at tag `Pl
   - In `libraries/SITL/SIM_Calibration.cpp`, `SERVO5` selects the mode: 1150 attitude, 1250 autonomous compass-calibration rotation, ≥1300 angular velocity. `SERVO6`–`8` set the attitude.
   - `DO_SET_SERVO` works because `SERVO5_FUNCTION=0`.
   - MAVForge's SITL tests use this only to act as the person at the vehicle. [verified]
+- **Compass calibration on hardware** (ArduPlane 4.6.2, USB power only, flight battery not connected, rotated by hand, 2026-10-23). [verified]
+  - Progress was polled through `RUNNING_STEP_ONE` → `RUNNING_STEP_TWO` → `SUCCESS`.
+  - One compass, fitness 11.6 against the default `COMPASS_CAL_FIT` of 16.
+  - Offsets 406.8 / −213.3 / 90.7 (length 468) were accepted and verified by read-back. That is within the default `COMPASS_OFFS_MAX` of 1800 (`AP_COMPASS_OFFSETS_MAX_DEFAULT`).
+  - `diagnose` now mirrors the firmware's "Compass offsets too high" pre-arm check: offset length greater than `COMPASS_OFFS_MAX`.

@@ -182,7 +182,24 @@ def _compass_cal(identity: VehicleIdentity, p: ParamView) -> list[Finding]:
         if not p.has(dev_name) or p.get(dev_name) == 0:
             continue
         offs = p.require(*(f"COMPASS_OFS{suffix}_{a}" for a in "XYZ"))
-        if math.hypot(*offs) != 0:
+        length = math.hypot(*offs)
+        limit = p.get("COMPASS_OFFS_MAX")
+        if limit is not None and length > limit:
+            findings.append(
+                finding(
+                    COMPASS,
+                    FindingKind.FAULT,
+                    f"Compass {number} offsets too high",
+                    f"Offset length {length:.0f} exceeds COMPASS_OFFS_MAX={limit:g}; "
+                    "ArduPilot's pre-arm check reports 'Compass offsets too high'. Usually "
+                    "magnetic interference near the compass or a bad calibration.",
+                    evidence={dev_name: p.get(dev_name), "COMPASS_OFFS_MAX": limit},
+                    recommendation="Move the compass away from metal and power wiring, "
+                    "then recalibrate.",
+                )
+            )
+            continue
+        if length != 0:
             continue
         evidence: dict[str, float | int | str | bool | None] = {
             dev_name: p.get(dev_name),

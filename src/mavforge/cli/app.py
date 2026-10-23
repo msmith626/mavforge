@@ -797,15 +797,15 @@ def _calibration_exit(st: CalibrationStatus) -> ExitCode:
     return exit_code_for(st.result.status) if st.result else ExitCode.TIMEOUT
 
 
-def _progress_line(st: CalibrationStatus) -> str:
-    line = st.instruction or st.state.value
-    if st.compasses:
-        line += "  " + "  ".join(
-            f"compass {c.compass_id}: "
-            f"{c.completion_pct if c.completion_pct is not None else '?'}% {c.status}"
-            for c in st.compasses
-        )
-    return line
+def _progress_line(st: CalibrationStatus) -> tuple[object, str]:
+    """(change key, text): the key moves only on a status change or a 10% step."""
+    key = tuple((c.compass_id, c.status, (c.completion_pct or 0) // 10) for c in st.compasses)
+    text = "  ".join(
+        f"compass {c.compass_id}: "
+        f"{c.completion_pct if c.completion_pct is not None else '?'}% {c.status}"
+        for c in st.compasses
+    )
+    return key, text
 
 
 def _run_calibration(
@@ -829,12 +829,17 @@ def _run_calibration(
     mavforge.approve_plan(request, approved_by="cli-yes-flag" if yes else "cli-prompt")
     st = vehicle.calibration.start(request)
     op = st.operation_id
-    last_line = ""
+    last_instruction: str | None = None
+    last_progress: object = None
     try:
         while not st.state.finished:
-            if (line := _progress_line(st)) != last_line:
-                err.print(Text(line))
-                last_line = line
+            if st.instruction and st.instruction != last_instruction:
+                err.print(Text(st.instruction, style="bold"))
+                last_instruction = st.instruction
+            key, progress = _progress_line(st)
+            if progress and key != last_progress:
+                err.print(Text(f"  {progress}"))
+                last_progress = key
             if st.state is CalibrationState.WAITING_FOR_USER and st.awaiting_confirmation:
                 typer.prompt(
                     "Press Enter when the vehicle is in position (Ctrl-C to cancel)",

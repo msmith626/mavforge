@@ -177,3 +177,14 @@ def test_missing_parameters_become_not_checked() -> None:
     result = run_rule(rules.BATTERY, ident("plane"), ParamView({"BATT_MONITOR": 4}))
     assert [f.kind for f in result] == [FindingKind.NOT_CHECKED]
     assert "BATT_FS_LOW_ACT" in result[0].detail
+
+
+def test_compass_offsets_too_high_mirrors_firmware_limit() -> None:
+    calibrated = COMPASS_ZERO | {
+        "COMPASS_LEARN": 0,
+        "COMPASS_OFS_X": 406.8,
+        "COMPASS_OFS_Y": -213.3,
+    }
+    assert kinds(rules.COMPASS, calibrated | {"COMPASS_OFFS_MAX": 1800}) == [FindingKind.PASSED]
+    too_high = calibrated | {"COMPASS_OFS_X": 1900.0, "COMPASS_OFFS_MAX": 1800}
+    assert titles(rules.COMPASS, too_high) == ["Compass 1 offsets too high"]
