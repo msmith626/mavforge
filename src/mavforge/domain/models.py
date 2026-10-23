@@ -495,6 +495,7 @@ class CalibrationKind(StrEnum):
     LEVEL = "level"
     COMPASS = "compass"
     ACCEL = "accel"
+    RADIO = "radio"
 
 
 class CalibrationState(StrEnum):
@@ -531,6 +532,11 @@ class CalibrationProcedure(_Model):
     success_evidence: str
     cancellation: str
     available_via_mcp: bool
+    proposes_plan: bool = Field(
+        default=False,
+        description="True if it writes nothing itself and its result is a parameter change "
+        "plan that needs approval before it is applied.",
+    )
     supported: bool = Field(description="Whether the connected vehicle supports it, if known.")
     reason: str | None = None
 
@@ -543,6 +549,15 @@ class CompassCalProgress(_Model):
     offsets: tuple[float, float, float] | None = None
 
 
+class RcChannelRange(_Model):
+    channel: int = Field(description="RC input channel, 1-based.")
+    role: str | None = Field(default=None, description="roll, pitch, throttle or yaw (RCMAP_*).")
+    current: int | None = Field(default=None, description="Latest PWM in microseconds.")
+    min: int | None = None
+    max: int | None = None
+    moved: bool = Field(description="Travelled far enough to count as swept.")
+
+
 class CalibrationResult(_Model):
     status: OperationStatus
     summary: str
@@ -553,6 +568,11 @@ class CalibrationResult(_Model):
     )
     reboot_required: bool = False
     warnings: list[str] = Field(default_factory=list)
+    plan: ChangePlan | None = Field(
+        default=None,
+        description="Proposed parameter changes (radio calibration). Nothing has been "
+        "written: a human must approve the plan before it is applied.",
+    )
 
 
 class CalibrationStatus(_Model):
@@ -571,6 +591,7 @@ class CalibrationStatus(_Model):
     )
     progress_pct: int | None = None
     compasses: list[CompassCalProgress] = Field(default_factory=list)
+    rc_channels: list[RcChannelRange] = Field(default_factory=list)
     vehicle_messages: list[StatusText] = Field(
         default_factory=list, description="STATUSTEXT received during the calibration."
     )

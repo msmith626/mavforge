@@ -51,6 +51,7 @@ from mavforge.services import params as params_service
 from mavforge.services import plan_store
 from mavforge.services import status as status_service
 from mavforge.services.calibration import operations as calibration_ops
+from mavforge.services.calibration.radio import RadioWorkflow
 from mavforge.services.diagnostics import DEFAULT_PREARM_WAIT
 from mavforge.services.session import (
     HEARTBEAT_TIMEOUT,
@@ -123,7 +124,8 @@ class Params:
 
 
 class Calibration:
-    """Calibration workflows. Each run needs an approved request (see :func:`approve_plan`)."""
+    """Calibration workflows. Each run that changes the vehicle needs an approved request
+    (see :func:`approve_plan`); radio calibration instead proposes an approvable plan."""
 
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -139,6 +141,16 @@ class Calibration:
     def start(self, request: str | Path | CalibrationRequest) -> CalibrationStatus:
         """Start an approved calibration in the background; poll :meth:`status`."""
         return calibration_ops.REGISTRY.start(self._session, request)
+
+    def start_radio(self, *, offline: bool = False) -> CalibrationStatus:
+        """Start a radio (RC) calibration sweep in the background; poll :meth:`status`.
+
+        Needs no approval to start: it writes nothing. Its result carries a change plan
+        (``result.plan``) that a human must approve before :meth:`Params.apply`.
+        """
+        return calibration_ops.REGISTRY.start_observation(
+            self._session, CalibrationKind.RADIO, workflow=RadioWorkflow(offline=offline)
+        )
 
     def status(self, operation_id: str) -> CalibrationStatus:
         return calibration_ops.REGISTRY.status(operation_id)

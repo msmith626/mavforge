@@ -34,6 +34,7 @@ See [docs/mavproxy.md](docs/mavproxy.md).
 | List backups | `mavforge.list_backups()` | `mavforge params backups` | `params_backups` | fake vehicle |
 | Change parameters: plan (validated against firmware metadata), human approval, backup, write, read-back verification | `vehicle.params.plan()`, `mavforge.approve_plan()`, `vehicle.params.apply()` | `mavforge params set`, `params plan`, `approve`, `params apply`, `params plans` | `params_plan`, `params_apply`, `params_plans` (with `--allow-configure`) | fake vehicle (incl. rejected, clamped, ignored writes, link loss), ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
 | Calibrate: gyro, level, onboard compass, 6-position accelerometer (guided, approved, evidence-based success) | `vehicle.calibration.request()/start()/status()/confirm()/cancel()` | `mavforge calibrate gyro\|level\|compass\|accel\|list` | `calibration_procedures`, `calibration_request`, `calibration_start`, `calibration_status`, `calibration_cancel` (with `--allow-calibrate`; accel not via MCP) | fake vehicle, ArduCopter 4.7.2 SITL (all four), ArduPlane 4.6.2 hardware (compass) |
+| Radio (RC) calibration: guided stick sweep that proposes `RCn_MIN/MAX/TRIM` as a change plan | `vehicle.calibration.start_radio()`, then `approve_plan` and `params.apply` | `mavforge calibrate radio [--plan-only]` | not via MCP | fake vehicle, ArduCopter 4.7.2 SITL |
 | Restore from a backup (identity-checked) | `vehicle.params.plan_restore()` | `mavforge params restore` | `params_plan_restore` | fake vehicle, ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
 | List operations and permissions | `mavforge.capabilities()` | `mavforge capabilities` | `mavforge_capabilities` | unit tests |
 
@@ -82,6 +83,7 @@ uv run mavforge -c tcp:127.0.0.1:5760 params restore <pre-change-backup-id>   # 
 # Calibrate: shows what you'll need to do, asks, then guides you live
 uv run mavforge calibrate list
 uv run mavforge -c /dev/ttyACM0 calibrate compass
+uv run mavforge -c /dev/ttyACM0 calibrate radio     # sweep the sticks, review the plan, apply
 ```
 
 To use a real flight controller over USB, run `mavforge -c /dev/ttyACM0 info`.

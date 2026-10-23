@@ -425,24 +425,24 @@ def _register_write_tools(server: MCPServer, provider: VehicleProvider) -> None:
         return _call(provider, lambda v: v.params.apply(plan_id))
 
 
+_CLI_ONLY_CALIBRATIONS = {
+    CalibrationKind.ACCEL: "The accelerometer calibration needs the person holding the vehicle "
+    "to confirm each of six positions; ask them to run `mavforge calibrate accel` at the "
+    "vehicle.",
+    CalibrationKind.RADIO: "The radio calibration needs the person at the transmitter to move "
+    "every stick and confirm each step; ask them to run `mavforge calibrate radio`.",
+}
+
+
 def _register_calibration_tools(server: MCPServer, provider: VehicleProvider) -> None:
     @server.tool(annotations=CREATES_LOCAL_FILE)
     def calibration_request(kind: CalibrationKind) -> CalibrationRequest:
         """Create a request to run a calibration (gyro, level or compass). Does NOT start
         it. Explain the procedure (calibration_procedures) to the user first: they must
         be at the vehicle. Then call calibration_start with the returned plan_id.
-        The 6-position accelerometer calibration is not available over MCP."""
-        if kind is CalibrationKind.ACCEL:
-            raise ToolError(
-                json.dumps(
-                    {
-                        "error": "unsupported",
-                        "message": "The accelerometer calibration needs the person holding "
-                        "the vehicle to confirm each of six positions; ask them to run "
-                        "`mavforge calibrate accel` at the vehicle.",
-                    }
-                )
-            )
+        The 6-position accelerometer and radio calibrations are not available over MCP."""
+        if message := _CLI_ONLY_CALIBRATIONS.get(kind):
+            raise ToolError(json.dumps({"error": "unsupported", "message": message}))
         return _call(provider, lambda v: v.calibration.request(kind))
 
     @server.tool(annotations=MODIFIES_VEHICLE)

@@ -1,9 +1,14 @@
 """CLI behaviour: output formats, exit codes and error reporting."""
 
+import io
 import json
+import threading
+import time
 from pathlib import Path
 
-from typer.testing import CliRunner
+import pytest
+import typer.testing
+from typer.testing import CliRunner, Result
 
 from mavforge.cli.app import app
 from mavforge.domain.errors import ExitCode
@@ -257,4 +262,97 @@ def test_calibrate_list_needs_no_vehicle() -> None:
     code, stdout, _ = invoke("--json", "calibrate", "list")
     assert code == ExitCode.OK
     kinds = [p["kind"] for p in json.loads(stdout)["procedures"]]
-    assert kinds == ["gyro", "level", "compass", "accel"]
+    assert kinds == ["gyro", "level", "compass", "accel", "radio"]
+
+
+class _GatedInput(io.BytesIO):
+    """stdin that hands out one line per read, the first only once ``gate`` is set."""
+
+    def __init__(self, data: bytes, gate: threading.Event) -> None:
+        super().__init__(data)
+        self.gate = gate
+
+    def read(self, size: int | None = -1) -> bytes:
+        if size == 0:
+            return b""
+        self.gate.wait(15)
+        return super().readline()
+
+    read1 = read  # type: ignore[assignment]
+
+
+def _person_at_transmitter(fake: FakeVehicle, gate: threading.Event) -> None:
+    """Wait until MAVForge reads RC input, sweep the sticks, centre them, then confirm."""
+
+    def rc_requests() -> int:
+        return sum(
+            isinstance(m, mavlink.MAVLink_command_long_message)
+            and m.command == mavlink.MAV_CMD_REQUEST_MESSAGE
+            and int(m.param1) == mavlink.MAVLINK_MSG_ID_RC_CHANNELS
+            for m in fake.received
+        )
+
+    deadline = time.monotonic() + 10
+    while rc_requests() < 3 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    for frame in ((1102, 1098, 1095, 1104), (1895, 1901, 1906, 1893)):
+        fake.set_rc(*frame)
+        time.sleep(0.3)
+    fake.set_rc(1498, 1501, 1096, 1502)
+    gate.set()
+
+
+def _calibrate_radio(
+    monkeypatch: pytest.MonkeyPatch,
+    fake: FakeVehicle,
+    *options: str,
+    data: bytes,
+    json_out: bool = False,
+) -> Result:
+    gate = threading.Event()
+    stdin = _GatedInput(data, gate)
+
+    # Typer's runner only takes str/bytes input; give it a stdin that waits for the person
+    def input_stream(_input: object, _charset: str) -> _GatedInput:
+        return stdin
+
+    monkeypatch.setattr(typer.testing, "make_input_stream", input_stream)
+    person = threading.Thread(target=_person_at_transmitter, args=(fake, gate), daemon=True)
+    person.start()
+    result = runner.invoke(
+        app,
+        [
+            "-c",
+            fake.connection_string,
+            *(["--json"] if json_out else []),
+            "calibrate",
+            "radio",
+            "--offline",
+            *options,
+        ],
+        env={"MAVFORGE_CONNECTION": None},
+    )
+    person.join(5)
+    return result
+
+
+def test_calibrate_radio_cli_sweeps_then_applies_after_approval(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeVehicle
+) -> None:
+    result = _calibrate_radio(monkeypatch, fake, data=b"\n\ny\n")
+    assert result.exit_code == ExitCode.OK, result.output
+    assert "moved: RC1 RC2 RC3 RC4" in result.stderr
+    assert "Write 12 parameter(s)" in result.stderr
+    assert "verified" in result.stdout
+    assert fake.config.params["RC3_MAX"][0] == 1906
+
+
+def test_calibrate_radio_plan_only_json_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeVehicle
+) -> None:
+    result = _calibrate_radio(monkeypatch, fake, "--plan-only", data=b"\n\n", json_out=True)
+    assert result.exit_code == ExitCode.OK, result.output
+    data = json.loads(result.stdout)
+    assert data["result"]["status"] == "succeeded"
+    assert len(data["result"]["plan"]["changes"]) == 12
+    assert not any(isinstance(m, mavlink.MAVLink_param_set_message) for m in fake.received)

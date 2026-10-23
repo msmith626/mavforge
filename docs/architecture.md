@@ -96,8 +96,11 @@
   - A `WorkflowContext` carries the person's `instruction`, an atomic step
     confirmation, cancellation, and live status.
   - Success requires the vehicle's terminal signal and a parameter read-back.
-  - Workflows that need physical confirmations (accel) are refused for MCP-initiated
-    runs in the service layer.
+  - Workflows that need physical confirmations (accel, radio) are refused for
+    MCP-initiated runs in the service layer.
+  - A workflow with `writes_vehicle = False` (radio) starts without a request, needing
+    only read permission (`OperationRegistry.start_observation`). It returns a
+    `ChangePlan` in `result.plan`, and that plan needs the usual approval to apply.
 - **Untrusted vehicle text.**
   - The CLI renders vehicle-originated text inertly: no rich markup, and control
     characters are replaced.

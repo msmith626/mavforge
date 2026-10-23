@@ -36,6 +36,7 @@ from mavforge.services import plan_store
 from mavforge.services.calibration.accel import AccelWorkflow
 from mavforge.services.calibration.base import CalibrationCancelled, Workflow, WorkflowContext
 from mavforge.services.calibration.compass import CompassWorkflow
+from mavforge.services.calibration.radio import RadioWorkflow
 from mavforge.services.calibration.simple import GyroWorkflow, LevelWorkflow
 from mavforge.services.changes import same_vehicle_problems
 from mavforge.services.session import Session
@@ -43,11 +44,17 @@ from mavforge.services.status import build_status
 
 log = logging.getLogger(__name__)
 
+_NO_REQUEST = (
+    "{kind} calibration writes nothing itself and needs no request: start it directly. "
+    "Its result is a change plan, which needs approval before it is applied."
+)
+
 WORKFLOWS: dict[CalibrationKind, Callable[[], Workflow]] = {
     CalibrationKind.GYRO: GyroWorkflow,
     CalibrationKind.LEVEL: LevelWorkflow,
     CalibrationKind.COMPASS: CompassWorkflow,
     CalibrationKind.ACCEL: AccelWorkflow,
+    CalibrationKind.RADIO: RadioWorkflow,
 }
 
 _STATE_FOR_STATUS = {
@@ -78,6 +85,8 @@ def procedures(session: Session | None = None) -> list[CalibrationProcedure]:
 
 def create_request(session: Session, kind: CalibrationKind) -> CalibrationRequest:
     """Record an approvable request to run ``kind`` on this vehicle. Sends nothing."""
+    if not WORKFLOWS[kind]().writes_vehicle:
+        raise InvalidInputError(_NO_REQUEST.format(kind=kind.value))
     draft = CalibrationRequest(
         plan_id="0" * 12,
         digest="",
@@ -131,6 +140,7 @@ class _Operation:
                 status=result.status.value,
                 summary=result.summary,
                 params_after=result.params_after,
+                plan_id=result.plan.plan_id if result.plan else None,
             )
         except OSError as exc:
             log.error("Could not audit calibration result: %s", exc)
@@ -159,15 +169,9 @@ class OperationRegistry:
         session.policy.require(Permission.CALIBRATE, operation)
         session.policy.require_vehicle_writable(session.identity.simulated, operation)
         wf = workflow or WORKFLOWS[request.kind]()
-        if request.kind not in session.adapter.supported_calibrations():
-            raise UnsupportedError(f"{request.kind.value} calibration is not supported here")
-        if reason := wf.check_supported(session.identity):
-            raise UnsupportedError(reason)
-        if session.interface == "mcp" and not wf.via_mcp:
-            raise UnsupportedError(
-                f"{request.kind.value} calibration needs the person at the vehicle to confirm "
-                f"each step; run `mavforge calibrate {request.kind.value}` there instead."
-            )
+        if not wf.writes_vehicle:
+            raise InvalidInputError(_NO_REQUEST.format(kind=request.kind.value))
+        self._check_runnable(session, request.kind, wf)
         if plan_store.valid_approval(request) is None:
             raise NotPermittedError(
                 f"Calibration request {request.plan_id} is not approved, or its approval "
@@ -178,13 +182,7 @@ class OperationRegistry:
             raise NotPermittedError(
                 f"Request {request.plan_id} was made for a different vehicle: {', '.join(problems)}"
             )
-        with self._lock:
-            if any(
-                not op.ctx.state.finished and op.ctx.session is session for op in self._ops.values()
-            ):
-                raise InvalidInputError("A calibration is already running on this vehicle")
-        if build_status(session).armed:
-            raise NotPermittedError("The vehicle is armed. Disarm before calibrating.")
+        self._check_idle_and_disarmed(session)
         try:
             session.audit.record(
                 "calibration_started",
@@ -198,8 +196,58 @@ class OperationRegistry:
                 f"Cannot write the audit log ({exc}); refusing to calibrate without a record"
             ) from exc
         plan_store.consume(request.plan_id)
+        return self._launch(session, request.kind, wf)
+
+    def start_observation(
+        self, session: Session, kind: CalibrationKind, *, workflow: Workflow | None = None
+    ) -> CalibrationStatus:
+        """Start a calibration that only observes the vehicle and proposes a change plan.
+
+        Needs only read permission: the sweep writes nothing, and the plan it produces
+        goes through the normal approve -> apply path.
+        """
+        session.policy.require(Permission.READ, f"calibrate_{kind.value}")
+        wf = workflow or WORKFLOWS[kind]()
+        if wf.writes_vehicle:
+            raise InvalidInputError(
+                f"{kind.value} calibration changes the vehicle and needs an approved request"
+            )
+        self._check_runnable(session, kind, wf)
+        self._check_idle_and_disarmed(session)
+        try:
+            session.audit.record(
+                "calibration_started",
+                kind=kind.value,
+                interface=session.interface,
+                vehicle_system_id=session.identity.system_id,
+            )
+        except OSError as exc:  # nothing is written, so a missing record is not fatal
+            log.error("Could not audit calibration start: %s", exc)
+        return self._launch(session, kind, wf)
+
+    def _check_runnable(self, session: Session, kind: CalibrationKind, wf: Workflow) -> None:
+        if kind not in session.adapter.supported_calibrations():
+            raise UnsupportedError(f"{kind.value} calibration is not supported here")
+        if reason := wf.check_supported(session.identity):
+            raise UnsupportedError(reason)
+        if session.interface == "mcp" and not wf.via_mcp:
+            raise UnsupportedError(
+                f"{kind.value} calibration needs the person at the vehicle to confirm "
+                f"each step; run `mavforge calibrate {kind.value}` there instead."
+            )
+
+    def _check_idle_and_disarmed(self, session: Session) -> None:
+        with self._lock:
+            if any(
+                not op.ctx.state.finished and op.ctx.session is session for op in self._ops.values()
+            ):
+                raise InvalidInputError("A calibration is already running on this vehicle")
+        if build_status(session).armed:
+            raise NotPermittedError("The vehicle is armed. Disarm before calibrating.")
+
+    def _launch(self, session: Session, kind: CalibrationKind, wf: Workflow) -> CalibrationStatus:
         op_id = secrets.token_hex(6)
-        op = _Operation(WorkflowContext(session, op_id, request.kind), wf)
+        op = _Operation(WorkflowContext(session, op_id, kind), wf)
         with self._lock:
             self._ops[op_id] = op
         op.thread.start()

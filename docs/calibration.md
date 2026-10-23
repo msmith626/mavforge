@@ -60,6 +60,7 @@ needs a reboot, the result says so.
 | Level (AHRS trim) | yes | success + rejected | **passed** | not yet | yes |
 | Compass (onboard) | yes, if `COMPASS_CALIBRATION` capability | success (1 and 3 compasses), per-compass failure, accept-without-save, cancel, timeout | **passed** (3 compasses, `calibration` model) | **passed**: ArduPlane 4.6.2, 1 compass, USB power only (2026-10-23) | yes |
 | Accelerometer, 6 positions | yes | success, failure, silence, cancel | **passed** (`calibration` model) | not yet | **no** |
+| Radio (RC) | yes (GCS-side sweep, proposes a change plan) | success, apply after approval, unmoved/uncentred/throttle-high, reversed throttle, RCMAP, jitter, no receiver, receiver in failsafe, cancel, armed | **passed** (`RC_CHANNELS_OVERRIDE` from the test) | not yet | **no** |
 
 Other autopilots use the generic adapter, which declares no calibrations.
 
@@ -151,6 +152,57 @@ even for requests created elsewhere.
 
 **Silence:** if the vehicle stops requesting poses for 30 s, the result is `unknown`.
 
+## Radio (RC)
+
+Radio calibration is different from the others. The autopilot takes no part, and
+**MAVForge writes nothing during it.** It watches the RC input, then proposes
+`RCn_MIN`, `RCn_MAX` and `RCn_TRIM` as an ordinary [change plan](../README.md). That
+plan goes through the normal approve → apply → read-back path.
+
+**Needs:**
+- The vehicle disarmed.
+- Motors unpowered or propellers removed. Control surfaces and outputs may move with
+  the sticks.
+- The transmitter on and the receiver bound, with RC input reaching the autopilot.
+- Transmitter trims centred, and no mixes you don't fly with.
+
+**Sequence:**
+1. MAVForge requests `RC_CHANNELS` (65) with `MAV_CMD_REQUEST_MESSAGE` every 0.1 s. It
+   doesn't change stream rates. Values outside 800..2200 (the documented range of the
+   `RCn_*` parameters, and Mission Planner's sample gate) are ignored per channel.
+2. **Sweep.** The person moves every stick, switch and knob to both ends. The live
+   status lists each channel's min/max and whether it has moved. A channel counts as
+   moved after 200 µs of travel. That threshold is MAVForge's choice: a stick spans
+   about 800 µs, while an unconnected channel jitters a few µs. The person confirms
+   (`sweep_done`).
+3. **Centre.** The person centres roll, pitch and yaw, puts the throttle down, and
+   confirms (`centred`). MAVForge takes the median of five readings as each channel's
+   trim, clamped to its sweep.
+4. **Checks**, using the channels in `RCMAP_ROLL/PITCH/THROTTLE/YAW`:
+   - Each primary channel must have moved.
+   - Roll, pitch and yaw trims must lie within 20% of their travel from the midpoint.
+   - The throttle must lie within 10% of its low end, or of its high end when
+     `RCn_REVERSED=1`.
+   - If any check fails, the result is `failed` and no plan is made.
+5. **Plan.** Every moved channel gets min/max/trim in a change plan. Channels that
+   didn't move are listed and left unchanged.
+
+**Success:** a `succeeded` result means the sweep was usable and a plan was recorded
+(`result.plan`). It does **not** mean anything was written. The values reach the
+vehicle only when a human approves the plan and it is applied with a read-back.
+
+**Interfaces:**
+- **CLI:** `mavforge calibrate radio` guides the sweep live, shows the plan, and asks
+  before writing. `--plan-only` saves the plan without writing.
+- **Python:** `vehicle.calibration.start_radio()`, then `approve_plan(result.plan)` and
+  `vehicle.params.apply(...)`.
+- **Permissions:** starting the sweep needs only read permission. Applying the plan
+  needs `configure`, plus the real-vehicle opt-in when it applies.
+- **Not over MCP:** the person at the transmitter has to do the moving and the
+  confirming.
+
+**Cancel:** at any time. Nothing has been written.
+
 ## Recovery
 
 - **Bad gyro, level or accel results.** Run the calibration again. Your earlier
@@ -161,3 +213,5 @@ even for requests created elsewhere.
   (interference, orientation, uneven rotation), then run it again.
 - **Interrupted runs.** After a cancelled or interrupted accelerometer calibration,
   reboot the autopilot before using it.
+- **Bad radio values.** The apply step takes a backup first. Undo with
+  `mavforge params restore <pre-change-backup-id>`, or run the calibration again.

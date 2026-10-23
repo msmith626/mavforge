@@ -116,9 +116,15 @@ Mission Planner uses only the STATUSTEXT; MAVForge will require both.
 - MAVForge will require `cal_status == MAG_CAL_SUCCESS` and then read the parameters back.
 - The fitness threshold is `COMPASS_CAL_FIT`.
 
-**Radio**
-- A GCS-side sweep records min/max/trim, then writes `RCn_MIN`, `RCn_MAX` and `RCn_TRIM`.
-- Mission Planner skips invalid channels without telling the user. MAVForge will report them.
+**Radio** (Mission Planner `ConfigRadioInput.cs`, `BUT_Calibrateradio_Click`)
+- A GCS-side sweep records min/max/trim, then writes `RCn_MIN`, `RCn_MAX` and `RCn_TRIM`. The firmware takes no part.
+- Mission Planner:
+  - Warns "Ensure your motor does not have power/no props!!!".
+  - Requests the RC stream at 10 Hz.
+  - Accepts a sample only if **channel 1** is inside 800..2200, then updates min/max for all 16 channels from it.
+  - After "Ensure all your sticks are centered and throttle is down", reads trim once per channel and clamps it to that channel's min..max.
+  - Writes a channel only if `min < max`, all values are non-zero, and trim is inside min..max. There is no minimum travel, so an unconnected channel jittering 1500 ± 2 is written with a 4 µs range. Its own results dialog notes unconnected channels "show about 1500 ± 2".
+  - Skips invalid channels without telling the user. MAVForge reports them.
 
 **ESC**
 - The `ESC_CALIBRATION` parameter plus a power cycle. This is high risk and deferred.
@@ -238,6 +244,10 @@ These were checked against ArduCopter 4.7.2 SITL. The source was read at tag `Pl
   - One compass, fitness 11.6 against the default `COMPASS_CAL_FIT` of 16.
   - Offsets 406.8 / −213.3 / 90.7 (length 468) were accepted and verified by read-back. That is within the default `COMPASS_OFFS_MAX` of 1800 (`AP_COMPASS_OFFSETS_MAX_DEFAULT`).
   - `diagnose` now mirrors the firmware's "Compass offsets too high" pre-arm check: offset length greater than `COMPASS_OFFS_MAX`.
+- **Radio calibration in SITL** (ArduCopter 4.7.2, 2026-10-23). [verified]
+  - `MAV_CMD_REQUEST_MESSAGE(RC_CHANNELS)` is answered, so MAVForge can poll at 10 Hz without changing stream rates.
+  - `RC_CHANNELS_OVERRIDE` from the test harness (source system 255) shows up in `RC_CHANNELS`. The sweep captured the overridden PWM values exactly.
+  - The resulting plan was applied, verified by read-back, and restored.
 - **Diagnose right after a reboot** (ArduPlane 4.6.2, USB, 2026-10-23). [verified]
   - The heartbeat reported mode `INITIALISING`. `SYS_STATUS`, `GPS_RAW_INT` and `SYSTEM_TIME` requests went unanswered.
   - The pre-arm reasons were start-up states: `EKF3 not started`, `waiting for home`, `Baro`/`Compass not healthy`, `INITIALISING mode not armable`.

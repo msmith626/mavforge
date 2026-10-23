@@ -91,6 +91,14 @@ CALIBRATE = OperationSpec(
     True,
 )
 
+CALIBRATE_RADIO = OperationSpec(
+    "calibrate_radio",
+    "Guided RC stick sweep that proposes RCn_MIN/MAX/TRIM as a change plan (writes "
+    "nothing itself; the plan is applied through params_apply after approval).",
+    Permission.READ,
+    False,
+)
+
 _PLANNED: list[OperationSpec] = []
 
 CATALOG: list[OperationSpec] = [
@@ -104,6 +112,7 @@ CATALOG: list[OperationSpec] = [
     PARAMS_PLAN,
     PARAMS_APPLY,
     CALIBRATE,
+    CALIBRATE_RADIO,
     *_PLANNED,
 ]
 

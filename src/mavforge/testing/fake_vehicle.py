@@ -142,6 +142,10 @@ class FakeVehicleConfig:
     gps_satellites: int = 14
     unanswered_message_ids: set[int] = field(default_factory=set[int])
     """REQUEST_MESSAGE ids that are ACKed but never sent (models a missing stream)."""
+    rc_inputs: list[int] = field(
+        default_factory=lambda: [1500, 1500, 1100, 1500, 1100, 1100, 1500, 1500]
+    )
+    """PWM per RC input channel reported in RC_CHANNELS; empty models no receiver."""
     other_autopilot_sysids: list[int] = field(default_factory=list[int])
     gcs_heartbeat_sysids: list[int] = field(default_factory=list[int])
 
@@ -293,6 +297,10 @@ class FakeVehicle:
         with self._lock:
             self.config.params[name] = (value, ptype)
 
+    def set_rc(self, *values: int) -> None:
+        """Set the RC input PWM of channels 1.. (models the person moving the sticks)."""
+        self.config.rc_inputs = list(values) + self.config.rc_inputs[len(values) :]
+
     def remove_param(self, name: str) -> None:
         """Remove a parameter, as if a firmware change dropped it. Thread-safe."""
         with self._lock:
@@ -363,6 +371,16 @@ class FakeVehicle:
         elif msg_id == mavlink.MAVLINK_MSG_ID_SYSTEM_TIME:
             boot_ms = int((cfg.uptime_s + time.monotonic() - self._started) * 1000)
             mav.system_time_send(0, boot_ms & 0xFFFFFFFF)
+        elif msg_id == mavlink.MAVLINK_MSG_ID_RC_CHANNELS:
+            values = list(cfg.rc_inputs[:18])
+            padded = values + [65535] * (18 - len(values))
+            boot_ms = int((cfg.uptime_s + time.monotonic() - self._started) * 1000)
+            chans = {f"chan{i + 1}_raw": v for i, v in enumerate(padded)}
+            mav.send(
+                mavlink.MAVLink_rc_channels_message(
+                    time_boot_ms=boot_ms & 0xFFFFFFFF, chancount=len(values), rssi=255, **chans
+                )
+            )
         elif msg_id == mavlink.MAVLINK_MSG_ID_SIMSTATE and cfg.simulated:
             mav.simstate_send(0, 0, 0, 0, 0, 0, 0, 0, 0, -353632620, 1491652370)
         else:
@@ -411,6 +429,7 @@ class FakeVehicle:
                 mavlink.MAVLINK_MSG_ID_AUTOPILOT_VERSION,
                 mavlink.MAVLINK_MSG_ID_SYS_STATUS,
                 mavlink.MAVLINK_MSG_ID_GPS_RAW_INT,
+                mavlink.MAVLINK_MSG_ID_RC_CHANNELS,
             ) or (msg_id == mavlink.MAVLINK_MSG_ID_SIMSTATE and self.config.simulated)
             self.ack(
                 mav, msg, cmd, mavlink.MAV_RESULT_ACCEPTED if known else mavlink.MAV_RESULT_FAILED

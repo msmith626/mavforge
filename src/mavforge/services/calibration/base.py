@@ -11,6 +11,7 @@ from __future__ import annotations
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -45,6 +46,7 @@ class WorkflowContext:
         self._updated_at = self.started_at
         self.cancel_requested = threading.Event()
         self._confirmed = threading.Event()
+        self._after_confirm: str | None = None
 
     # -- status --------------------------------------------------------------------
 
@@ -84,8 +86,22 @@ class WorkflowContext:
 
     # -- human interaction -------------------------------------------------------------
 
-    def wait_for_confirmation(self, step: str, instruction: str, timeout: float) -> bool:
-        """Ask the person to perform a physical step and confirm it. False on timeout."""
+    def wait_for_confirmation(
+        self,
+        step: str,
+        instruction: str,
+        timeout: float,
+        *,
+        poll: Callable[[], None] | None = None,
+        after: str | None = "Hold the vehicle still while it samples this position.",
+    ) -> bool:
+        """Ask the person to perform a physical step and confirm it. False on timeout.
+
+        ``poll`` runs repeatedly while waiting (it should block briefly, e.g. reading
+        telemetry); ``after`` is the instruction shown once the step is confirmed.
+        """
+        with self._lock:
+            self._after_confirm = after
         self.update(
             state=CalibrationState.WAITING_FOR_USER,
             instruction=instruction,
@@ -94,7 +110,9 @@ class WorkflowContext:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             self.check_cancelled()
-            if self._confirmed.wait(0.1):
+            if poll is not None:
+                poll()
+            if self._confirmed.wait(0 if poll else 0.1):
                 return True
         return False
 
@@ -109,7 +127,7 @@ class WorkflowContext:
             self._fields.update(
                 awaiting_confirmation=None,
                 state=CalibrationState.RUNNING,
-                instruction="Hold the vehicle still while it samples this position.",
+                instruction=self._after_confirm,
             )
             self._updated_at = datetime.now(UTC)
             self._confirmed.set()
@@ -142,6 +160,9 @@ class Workflow(ABC):
     kind: CalibrationKind
     via_mcp: bool = True
     """False when the protocol needs the person at the vehicle to confirm steps."""
+    writes_vehicle: bool = True
+    """False for workflows that only observe and propose a change plan (radio). They
+    start without an approved request; the plan they produce needs approval instead."""
 
     @abstractmethod
     def procedure(self) -> CalibrationProcedure: ...

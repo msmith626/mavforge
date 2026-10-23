@@ -55,7 +55,7 @@ registered only when the server is started with `--allow-calibrate`.
 
 | Tool | Purpose |
 |---|---|
-| `calibration_request` | Create a request for gyro, level or compass calibration. The accelerometer calibration is refused: each pose must be confirmed by the person at the vehicle |
+| `calibration_request` | Create a request for gyro, level or compass calibration. The accelerometer and radio calibrations are refused: each step must be done and confirmed by the person at the vehicle or transmitter |
 | `calibration_start` | Start an **approved** request. Uses the same hidden approval as `params_apply` |
 | `calibration_status` | Poll the instruction for the person, per-compass progress, and the final result |
 | `calibration_cancel` | Cancel. Compass calibration is cancelled on the vehicle, and nothing is saved |

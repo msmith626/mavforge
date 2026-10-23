@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -741,6 +742,11 @@ def params_diff(
     _with_vehicle(ctx, lambda v: v.params.diff(baseline), render)
 
 
+_WRITE_POLICY = Policy.configure(allow_real_vehicle=True)
+"""CLI write commands act for the human at the terminal, who reviews and confirms every
+plan (marked REAL VEHICLE when applicable) before anything is written."""
+
+
 _CALIBRATE_POLICY = Policy.calibrate(allow_real_vehicle=True)
 
 
@@ -765,16 +771,16 @@ def render_procedures(procs: list[CalibrationProcedure]) -> None:
         out.print()
 
 
-def render_calibration(st: CalibrationStatus) -> None:
+def render_calibration(st: CalibrationStatus, console: Console = out) -> None:
     r = st.result
     if r is None:
-        out.print(Text(f"Calibration {st.operation_id} is {st.state.value}."))
+        console.print(Text(f"Calibration {st.operation_id} is {st.state.value}."))
         return
     style = "green" if r.status is OperationStatus.SUCCEEDED else "bold red"
-    out.print(Text(f"{st.kind.value} calibration: {r.status.value}", style=style))
-    out.print(Text(r.summary))
+    console.print(Text(f"{st.kind.value} calibration: {r.status.value}", style=style))
+    console.print(Text(r.summary))
     for item in r.evidence:
-        out.print(Text(f"  evidence: {item}", style="dim"))
+        console.print(Text(f"  evidence: {item}", style="dim"))
     changed = {
         k: (r.params_before.get(k), v)
         for k, v in r.params_after.items()
@@ -788,9 +794,9 @@ def render_calibration(st: CalibrationStatus) -> None:
             table.add_row(
                 name, format_value(before) if before is not None else "?", format_value(after)
             )
-        out.print(table)
+        console.print(table)
     for warning in r.warnings:
-        out.print(Text(f"! {warning}", style="bold yellow"))
+        console.print(Text(f"! {warning}", style="bold yellow"))
 
 
 def _calibration_exit(st: CalibrationStatus) -> ExitCode:
@@ -799,6 +805,12 @@ def _calibration_exit(st: CalibrationStatus) -> ExitCode:
 
 def _progress_line(st: CalibrationStatus) -> tuple[object, str]:
     """(change key, text): the key moves only on a status change or a 10% step."""
+    if st.rc_channels:
+        moved = [f"RC{c.channel}" for c in st.rc_channels if c.moved]
+        waiting = [f"RC{c.channel}" for c in st.rc_channels if not c.moved]
+        return tuple(c.moved for c in st.rc_channels), (
+            f"moved: {' '.join(moved) or '-'}   not yet: {' '.join(waiting) or '-'}"
+        )
     key = tuple((c.compass_id, c.status, (c.completion_pct or 0) // 10) for c in st.compasses)
     text = "  ".join(
         f"compass {c.compass_id}: "
@@ -827,26 +839,46 @@ def _run_calibration(
         if not ok:
             raise NotApprovedError("Calibration not started")
     mavforge.approve_plan(request, approved_by="cli-yes-flag" if yes else "cli-prompt")
-    st = vehicle.calibration.start(request)
+    return _follow(
+        vehicle,
+        vehicle.calibration.start(request),
+        "Press Enter when the vehicle is in position (Ctrl-C to cancel)",
+    )
+
+
+def _follow(vehicle: mavforge.Vehicle, st: CalibrationStatus, prompt: str) -> CalibrationStatus:
+    """Show live guidance for a running calibration and pass on the person's confirmations."""
     op = st.operation_id
     last_instruction: str | None = None
     last_progress: object = None
+
+    def show_progress(current: CalibrationStatus) -> None:
+        nonlocal last_progress
+        key, progress = _progress_line(current)
+        if progress and key != last_progress:
+            err.print(Text(f"  {progress}"))
+            last_progress = key
+
+    def watch(stop: threading.Event) -> None:
+        """Keep progress live (e.g. RC channels as they move) while waiting for Enter."""
+        while not stop.wait(0.25):
+            show_progress(vehicle.calibration.status(op))
+
     try:
         while not st.state.finished:
             if st.instruction and st.instruction != last_instruction:
                 err.print(Text(st.instruction, style="bold"))
                 last_instruction = st.instruction
-            key, progress = _progress_line(st)
-            if progress and key != last_progress:
-                err.print(Text(f"  {progress}"))
-                last_progress = key
+            show_progress(st)
             if st.state is CalibrationState.WAITING_FOR_USER and st.awaiting_confirmation:
-                typer.prompt(
-                    "Press Enter when the vehicle is in position (Ctrl-C to cancel)",
-                    default="",
-                    show_default=False,
-                    err=True,
-                )
+                stop = threading.Event()
+                watcher = threading.Thread(target=watch, args=(stop,), daemon=True)
+                watcher.start()
+                try:
+                    typer.prompt(prompt, default="", show_default=False, err=True)
+                finally:
+                    stop.set()
+                    watcher.join()
                 st = vehicle.calibration.confirm(op, st.awaiting_confirmation)
                 continue
             time.sleep(0.25)
@@ -876,7 +908,68 @@ def _calibrate_command(kind: CalibrationKind) -> Callable[..., None]:
 
 
 for _kind in CalibrationKind:
-    calibrate_app.command(_kind.value)(_calibrate_command(_kind))
+    if _kind is not CalibrationKind.RADIO:
+        calibrate_app.command(_kind.value)(_calibrate_command(_kind))
+
+
+def render_radio(r: CalibrationStatus | ApplyResult) -> None:
+    if isinstance(r, ApplyResult):
+        render_apply(r)
+        return
+    render_calibration(r)
+    plan = r.result.plan if r.result else None
+    if plan is not None and not plan.blocked and any(not c.no_change for c in plan.changes):
+        render_plan_saved(plan)
+
+
+def _radio_exit(r: CalibrationStatus | ApplyResult) -> ExitCode:
+    return _status_exit_code(r) if isinstance(r, ApplyResult) else _calibration_exit(r)
+
+
+@calibrate_app.command("radio")
+def calibrate_radio(
+    ctx: typer.Context,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Apply the captured values without asking.")
+    ] = False,
+    plan_only: Annotated[
+        bool, typer.Option(help="Save the change plan for later review; write nothing.")
+    ] = False,
+    offline: Annotated[bool, typer.Option(help="Do not download parameter metadata.")] = False,
+) -> None:
+    """Radio (RC) calibration: sweep the sticks, review the RCn_MIN/MAX/TRIM plan, apply it."""
+
+    def act(vehicle: mavforge.Vehicle) -> CalibrationStatus | ApplyResult:
+        proc = next(p for p in vehicle.calibration.procedures() if p.kind is CalibrationKind.RADIO)
+        render_procedure(proc, err)
+        if not proc.supported:
+            raise NotApprovedError(f"{proc.title} is not available: {proc.reason}")
+        st = _follow(
+            vehicle,
+            vehicle.calibration.start_radio(offline=offline),
+            "Press Enter when done (Ctrl-C to cancel)",
+        )
+        result = st.result
+        plan = result.plan if result else None
+        if (
+            plan_only
+            or result is None
+            or result.status is not OperationStatus.SUCCEEDED
+            or plan is None
+            or all(c.no_change for c in plan.changes)
+        ):
+            return st
+        render_calibration(st, err)
+        try:
+            _confirm_and_approve(plan, yes)
+        except NotApprovedError as exc:
+            raise NotApprovedError(
+                f"{exc.message}. The plan is saved: `mavforge -c <connection> params apply "
+                f"{plan.plan_id}` applies it later."
+            ) from exc
+        return vehicle.params.apply(plan)
+
+    _with_vehicle(ctx, act, render_radio, _radio_exit, policy=_WRITE_POLICY)
 
 
 @calibrate_app.command("list")
@@ -887,11 +980,6 @@ def calibrate_list(ctx: typer.Context) -> None:
         lambda: CalibrationProcedureList(procedures=calibration_procedures()),
         lambda r: render_procedures(r.procedures),
     )
-
-
-_WRITE_POLICY = Policy.configure(allow_real_vehicle=True)
-"""CLI write commands act for the human at the terminal, who reviews and confirms every
-plan (marked REAL VEHICLE when applicable) before anything is written."""
 
 
 @params_app.command("set")
