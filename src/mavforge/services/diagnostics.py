@@ -153,7 +153,23 @@ def vehicle_uptime(session: Session) -> float | None:
     return None
 
 
-def _uptime_findings(uptime: float | None) -> list[Finding]:
+def _uptime_findings(uptime: float | None, status: StatusReport) -> list[Finding]:
+    # Seen on ArduPlane 4.6.2 right after a reboot: mode INITIALISING, and requests for
+    # SYS_STATUS, GPS_RAW_INT and SYSTEM_TIME went unanswered.
+    if status.mode == "INITIALISING" or status.system_status in {"UNINIT", "BOOT"}:
+        return [
+            finding(
+                "vehicle.uptime",
+                FindingKind.WARNING,
+                "Vehicle is still starting up",
+                f"The vehicle reports mode {status.mode or '?'} / state "
+                f"{status.system_status}. Most sensor, EKF and pre-arm findings in this "
+                "report are likely start-up transients.",
+                source=FindingSource.TELEMETRY,
+                evidence={"mode": status.mode, "system_status": status.system_status},
+                recommendation="Wait about a minute and re-run diagnostics.",
+            )
+        ]
     if uptime is None or uptime >= SETTLE_TIME_S:
         return []
     return [
@@ -260,7 +276,7 @@ def build_report(
     uptime: float | None = None,
 ) -> DiagnosticReport:
     findings = (
-        _uptime_findings(uptime)
+        _uptime_findings(uptime, status)
         + _prearm_findings(status, outcome, texts)
         + _telemetry_findings(status, session)
         + _param_findings(session, backup)

@@ -238,3 +238,8 @@ These were checked against ArduCopter 4.7.2 SITL. The source was read at tag `Pl
   - One compass, fitness 11.6 against the default `COMPASS_CAL_FIT` of 16.
   - Offsets 406.8 / −213.3 / 90.7 (length 468) were accepted and verified by read-back. That is within the default `COMPASS_OFFS_MAX` of 1800 (`AP_COMPASS_OFFSETS_MAX_DEFAULT`).
   - `diagnose` now mirrors the firmware's "Compass offsets too high" pre-arm check: offset length greater than `COMPASS_OFFS_MAX`.
+- **Diagnose right after a reboot** (ArduPlane 4.6.2, USB, 2026-10-23). [verified]
+  - The heartbeat reported mode `INITIALISING`. `SYS_STATUS`, `GPS_RAW_INT` and `SYSTEM_TIME` requests went unanswered.
+  - The pre-arm reasons were start-up states: `EKF3 not started`, `waiting for home`, `Baro`/`Compass not healthy`, `INITIALISING mode not armable`.
+  - About a minute later, the same check showed only bench conditions (GPS bad fix, radio failsafe → RTL) and `EKF3 Yaw inconsistent 119 deg. Wait`.
+  - `diagnose` now warns "Vehicle is still starting up" whenever the heartbeat says so, even when uptime is not available.

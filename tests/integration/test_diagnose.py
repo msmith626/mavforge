@@ -95,3 +95,20 @@ def test_recent_boot_is_flagged(make_fake: FakeFactory) -> None:
     uptime = [f for f in report.findings if f.check == "vehicle.uptime"]
     assert [f.kind for f in uptime] == [FindingKind.WARNING]
     assert uptime[0].title == "Vehicle started recently"
+
+
+def test_initialising_vehicle_is_flagged_even_without_uptime(make_fake: FakeFactory) -> None:
+    """Seen on ArduPlane 4.6.2 just after reboot: mode INITIALISING and unanswered requests."""
+    fake = make_fake(
+        mav_type=mavlink.MAV_TYPE_FIXED_WING,
+        custom_mode=16,  # ArduPlane INITIALISING
+        unanswered_message_ids={
+            mavlink.MAVLINK_MSG_ID_SYSTEM_TIME,
+            mavlink.MAVLINK_MSG_ID_SYS_STATUS,
+        },
+    )
+    with mavforge.connect(fake.connection_string) as vehicle:
+        report = vehicle.diagnose(prearm_wait=0.5)
+    starting = [f for f in report.findings if f.check == "vehicle.uptime"]
+    assert [f.title for f in starting] == ["Vehicle is still starting up"]
+    assert starting[0].kind is FindingKind.WARNING
