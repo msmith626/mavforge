@@ -78,8 +78,9 @@ class CompassWorkflow(Workflow):
             preconditions=[
                 "Vehicle disarmed",
                 "At least one compass detected (COMPASS_DEV_ID non-zero)",
-                "Away from metal, vehicles, speakers and power cables",
-                "Flight battery connected if the compass is near power wiring",
+                "Away from metal, vehicles, computers, phones and speakers",
+                "Flight battery not required (USB power is fine); keep parts near the "
+                "compass in their flight positions",
             ],
             human_steps=[ROTATE],
             changes_parameters=["COMPASS_OFS*", "COMPASS_DIA*", "COMPASS_ODI*", "COMPASS_SCALE*"],

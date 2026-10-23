@@ -95,7 +95,10 @@ Other autopilots use the generic adapter, which declares no calibrations.
 - The vehicle disarmed.
 - At least one `COMPASS_DEV_ID*` non-zero.
 - The vehicle advertises `COMPASS_CALIBRATION`.
-- No magnetic interference nearby.
+- No magnetic interference nearby (metal, computers, phones, speakers).
+- The flight battery is not required; USB power is fine. ArduPilot's compass
+  calibration guide doesn't require it. Motor-current interference is a separate,
+  powered procedure (`compassmot`) that MAVForge doesn't implement.
 
 **Sequence:**
 1. `MAV_CMD_DO_START_MAG_CAL` with mask=0 (all compasses), retry=0, autosave=0,
