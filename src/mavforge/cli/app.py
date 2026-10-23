@@ -871,11 +871,18 @@ def _follow(vehicle: mavforge.Vehicle, st: CalibrationStatus, prompt: str) -> Ca
                 last_instruction = st.instruction
             show_progress(st)
             if st.state is CalibrationState.WAITING_FOR_USER and st.awaiting_confirmation:
+                text, suffix = prompt, ": "
+                if _progress_line(st)[1]:
+                    # Live progress prints below while waiting, so the prompt gets its own line.
+                    err.print(Text(f"{prompt}."))
+                    text, suffix = "", ""
                 stop = threading.Event()
                 watcher = threading.Thread(target=watch, args=(stop,), daemon=True)
                 watcher.start()
                 try:
-                    typer.prompt(prompt, default="", show_default=False, err=True)
+                    typer.prompt(
+                        text, default="", show_default=False, prompt_suffix=suffix, err=True
+                    )
                 finally:
                     stop.set()
                     watcher.join()

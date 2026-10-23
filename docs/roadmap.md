@@ -12,7 +12,7 @@ Capabilities are claimed only once they are tested.
 | 3. Diagnostics (remaining) | More rules, each sourced from firmware or metadata: servo/motor output functions, airspeed setup for planes, serial-port protocol conflicts, failsafe thresholds vs battery capacity. Optional comparison against a saved baseline inside the report. Findings that propose a parameter plan (never auto-applied) | Rule unit tests; SITL with induced faults (SIM_* params) produces the expected findings |
 | **M4 (done)** | Parameter changes: plan (type, bounds, versioned `apm.pdef` metadata, safety notes) → human approval (CLI prompt / `mavforge approve` / MCP elicitation; digest-bound, expiring, single-use) → apply (policy, identity, disarmed, fail-closed audit, pre-change backup, drift skip, write + read-back) → per-parameter outcomes; restore from backup with identity gate; MCP write tools behind `--allow-configure` / `--allow-real-vehicle` | Fault-injection tests (rejected, clamped, ignored writes, link loss, drift, tamper, expiry, forgery); parity; SITL write+restore; consented write+restore on ArduPlane 4.6.2 |
 | **M5 (done)** | Calibration: gyro, level, onboard compass, 6-position accel as state machines (`services/calibration/`); approved single-use requests; background operations with status/confirm/cancel; evidence-based success; CLI live guidance; MCP behind `--allow-calibrate` (accel CLI/API only) | Fake-vehicle success/failure/cancel/timeout tests, MCP authorization tests, parity, all four passing on ArduCopter 4.7.2 SITL |
-| **M6 (done)** | Radio (RC) calibration: guided `RC_CHANNELS` sweep (10 Hz `REQUEST_MESSAGE`, per-channel range gate, 200 µs travel threshold), centred/throttle-low checks via `RCMAP_*` and `RCn_REVERSED`, result is a `ChangePlan` applied through the normal approval; sweep needs read permission only; CLI live guidance, `--plan-only`; not via MCP | Fake-vehicle tests (success, apply after approval, unmoved, uncentred, throttle high, reversed, RCMAP, jitter, no receiver, cancel, armed, permissions), CLI tests, MCP refusal, ArduCopter 4.7.2 SITL sweep → apply → restore |
+| **M6 (done)** | Radio (RC) calibration: guided `RC_CHANNELS` sweep (10 Hz `REQUEST_MESSAGE`, per-channel range gate, 200 µs travel threshold), centred/throttle-low checks via `RCMAP_*` and `RCn_REVERSED`, result is a `ChangePlan` applied through the normal approval; sweep needs read permission only; CLI live guidance, `--plan-only`; not via MCP | Fake-vehicle tests (success, apply after approval, unmoved, uncentred, throttle high, reversed, RCMAP, jitter, no receiver, cancel, armed, permissions), CLI tests, MCP refusal, ArduCopter 4.7.2 SITL sweep → apply → restore; hardware: ArduPlane 4.6.2 with a Spektrum DX7s (2026-10-23) |
 | 4. Calibration (remaining) | Large-vehicle MagCal (`MAV_CMD_FIXED_MAG_CAL_YAW`); barometer; ESC deferred (high risk). Hardware validation of the existing workflows | Same test levels; hardware runs with the owner present |
 | 5. Hardening | Reconnect during long operations, wrong-vehicle tests, security review, MCP authorization tests, localhost HTTP transport | Security checklist complete; parity tests cover every write path |
 | 6. Release | API / CLI / MCP reference docs, compatibility matrix backed by test evidence, 0.1.0 | Fresh-clone quick start verified |
@@ -21,8 +21,8 @@ Capabilities are claimed only once they are tested.
 
 Pick one of these:
 
-- **Hardware validation** on your ArduPlane 4.6.2 board, with the transmitter on: radio
-  calibration, then gyro and level.
+- **Hardware validation** on your ArduPlane 4.6.2 board: gyro and level calibration (radio
+  calibration passed on 2026-10-23).
 - **Hardening:** reconnect during long operations, and the localhost HTTP MCP transport.
 - **More diagnostics rules:** servo output functions, plane airspeed setup, serial
   protocol conflicts, failsafe thresholds against battery capacity.

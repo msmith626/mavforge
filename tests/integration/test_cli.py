@@ -342,6 +342,9 @@ def test_calibrate_radio_cli_sweeps_then_applies_after_approval(
     result = _calibrate_radio(monkeypatch, fake, data=b"\n\ny\n")
     assert result.exit_code == ExitCode.OK, result.output
     assert "moved: RC1 RC2 RC3 RC4" in result.stderr
+    # live progress must not land on the prompt's line
+    assert "Press Enter when done (Ctrl-C to cancel).\n" in result.stderr
+    assert "cancel):" not in result.stderr
     assert "Write 12 parameter(s)" in result.stderr
     assert "verified" in result.stdout
     assert fake.config.params["RC3_MAX"][0] == 1906
