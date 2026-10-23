@@ -24,6 +24,10 @@ from mavforge.domain.models import (
     Approval,
     BackupListResult,
     BackupResult,
+    CalibrationKind,
+    CalibrationProcedure,
+    CalibrationRequest,
+    CalibrationStatus,
     CapabilitiesResult,
     ChangePlan,
     DiagnosticReport,
@@ -46,6 +50,7 @@ from mavforge.services import info as info_service
 from mavforge.services import params as params_service
 from mavforge.services import plan_store
 from mavforge.services import status as status_service
+from mavforge.services.calibration import operations as calibration_ops
 from mavforge.services.diagnostics import DEFAULT_PREARM_WAIT
 from mavforge.services.session import (
     HEARTBEAT_TIMEOUT,
@@ -117,12 +122,45 @@ class Params:
         return diff_service.diff_vehicle(self._session, backup_service.resolve_reference(reference))
 
 
+class Calibration:
+    """Calibration workflows. Each run needs an approved request (see :func:`approve_plan`)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def procedures(self) -> list[CalibrationProcedure]:
+        """What each calibration does, needs and changes, and whether this vehicle supports it."""
+        return calibration_ops.procedures(self._session)
+
+    def request(self, kind: CalibrationKind | str) -> CalibrationRequest:
+        """Create a request to run ``kind``. A human must approve it before :meth:`start`."""
+        return calibration_ops.create_request(self._session, CalibrationKind(kind))
+
+    def start(self, request: str | Path | CalibrationRequest) -> CalibrationStatus:
+        """Start an approved calibration in the background; poll :meth:`status`."""
+        return calibration_ops.REGISTRY.start(self._session, request)
+
+    def status(self, operation_id: str) -> CalibrationStatus:
+        return calibration_ops.REGISTRY.status(operation_id)
+
+    def confirm(self, operation_id: str, step: str) -> CalibrationStatus:
+        """Confirm a physical step (e.g. an accelerometer pose) the person has completed."""
+        return calibration_ops.REGISTRY.confirm(operation_id, step)
+
+    def cancel(self, operation_id: str) -> CalibrationStatus:
+        return calibration_ops.REGISTRY.cancel(operation_id)
+
+    def wait(self, operation_id: str, timeout: float | None = None) -> CalibrationStatus:
+        return calibration_ops.REGISTRY.wait(operation_id, timeout)
+
+
 class Vehicle:
     """A connected vehicle. Create with :func:`connect`; close when done."""
 
     def __init__(self, session: Session) -> None:
         self.session = session
         self.params = Params(session)
+        self.calibration = Calibration(session)
 
     @property
     def identity(self) -> VehicleIdentity:
@@ -212,14 +250,26 @@ def load_plan(plan: str | Path) -> ChangePlan:
     return plan_store.load_plan(plan)
 
 
-def approve_plan(plan: str | Path | ChangePlan, *, approved_by: str = "api") -> Approval:
-    """Record a human's approval of a plan (valid for 10 minutes, bound to its digest).
+def approve_plan(
+    plan: str | Path | ChangePlan | CalibrationRequest, *, approved_by: str = "api"
+) -> Approval:
+    """Record a human's approval of a change plan or calibration request (valid for 10
+    minutes, bound to its digest, single use).
 
-    Call this only on behalf of a person who has reviewed the plan. AI agents using the
-    MCP server have no way to call it.
+    Call this only on behalf of a person who has reviewed it. AI agents using the MCP
+    server have no way to call it.
     """
-    loaded = plan if isinstance(plan, ChangePlan) else plan_store.load_plan(plan)
+    loaded = (
+        plan
+        if isinstance(plan, ChangePlan | CalibrationRequest)
+        else plan_store.load_approvable(plan)
+    )
     return plan_store.approve(loaded, approved_by)
+
+
+def calibration_procedures() -> list[CalibrationProcedure]:
+    """Every calibration MAVForge knows (no vehicle needed)."""
+    return calibration_ops.procedures()
 
 
 def list_plans() -> PlanListResult:

@@ -488,3 +488,108 @@ class PlanInfo(_Model):
 class PlanListResult(_Model):
     status: OperationStatus
     plans: list[PlanInfo]
+
+
+class CalibrationKind(StrEnum):
+    GYRO = "gyro"
+    LEVEL = "level"
+    COMPASS = "compass"
+    ACCEL = "accel"
+
+
+class CalibrationState(StrEnum):
+    STARTING = "starting"
+    WAITING_FOR_USER = "waiting_for_user"
+    """A physical action is needed; see `instruction` and `awaiting_confirmation`."""
+    RUNNING = "running"
+    VERIFYING = "verifying"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    UNKNOWN = "unknown"
+
+    @property
+    def finished(self) -> bool:
+        return self in {
+            CalibrationState.SUCCEEDED,
+            CalibrationState.FAILED,
+            CalibrationState.CANCELLED,
+            CalibrationState.UNKNOWN,
+        }
+
+
+class CalibrationProcedure(_Model):
+    """What a calibration does and what it needs, for humans and agents to read first."""
+
+    kind: CalibrationKind
+    title: str
+    summary: str
+    preconditions: list[str]
+    human_steps: list[str]
+    changes_parameters: list[str] = Field(description="Parameter groups the firmware rewrites.")
+    typical_duration: str
+    success_evidence: str
+    cancellation: str
+    available_via_mcp: bool
+    supported: bool = Field(description="Whether the connected vehicle supports it, if known.")
+    reason: str | None = None
+
+
+class CompassCalProgress(_Model):
+    compass_id: int
+    status: str = Field(description="MAG_CAL_STATUS name, e.g. RUNNING_STEP_TWO or SUCCESS.")
+    completion_pct: int | None = None
+    fitness: float | None = Field(default=None, description="RMS milligauss; lower is better.")
+    offsets: tuple[float, float, float] | None = None
+
+
+class CalibrationResult(_Model):
+    status: OperationStatus
+    summary: str
+    params_before: dict[str, float | int] = Field(default_factory=dict)
+    params_after: dict[str, float | int] = Field(default_factory=dict)
+    evidence: list[str] = Field(
+        default_factory=list, description="The signals success or failure was decided on."
+    )
+    reboot_required: bool = False
+    warnings: list[str] = Field(default_factory=list)
+
+
+class CalibrationStatus(_Model):
+    operation_id: str
+    kind: CalibrationKind
+    vehicle: VehicleIdentity
+    state: CalibrationState
+    started_at: datetime
+    updated_at: datetime
+    instruction: str | None = Field(
+        default=None, description="What the person at the vehicle should do now."
+    )
+    awaiting_confirmation: str | None = Field(
+        default=None,
+        description="Step the person must confirm when done (e.g. an accelerometer pose).",
+    )
+    progress_pct: int | None = None
+    compasses: list[CompassCalProgress] = Field(default_factory=list)
+    vehicle_messages: list[StatusText] = Field(
+        default_factory=list, description="STATUSTEXT received during the calibration."
+    )
+    result: CalibrationResult | None = None
+
+
+class CalibrationRequest(_Model):
+    """An approvable request to start a calibration (used for MCP approvals)."""
+
+    format: Literal["mavforge.calibration-request"] = "mavforge.calibration-request"
+    schema_version: Literal[1] = 1
+    plan_id: str
+    digest: str
+    created_at: datetime
+    kind: CalibrationKind
+    vehicle: VehicleIdentity
+    blocked: bool = False
+
+
+class CalibrationProcedureList(_Model):
+    status: OperationStatus = OperationStatus.SUCCEEDED
+    procedures: list[CalibrationProcedure]

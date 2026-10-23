@@ -19,6 +19,7 @@ from types import TracebackType
 from typing import Self
 
 from mavforge.domain.models import ParamType
+from mavforge.testing.fake_calibration import FakeCalibration, FakeCalibrationConfig
 from mavforge.transport.dialect import Message, mavlink
 
 ParamSpec = tuple[float, ParamType]
@@ -74,6 +75,11 @@ def default_copter_params() -> dict[str, ParamSpec]:
         "BATT_FS_CRT_ACT": (1, ParamType.INT8),
         "GPS1_TYPE": (1, ParamType.INT8),
         "LOG_BACKEND_TYPE": (1, ParamType.INT8),
+        "INS_GYROFFS_X": (0.0011, ParamType.REAL32),
+        "INS_GYROFFS_Y": (-0.0006, ParamType.REAL32),
+        "INS_GYROFFS_Z": (0.0002, ParamType.REAL32),
+        "AHRS_TRIM_X": (0.0, ParamType.REAL32),
+        "AHRS_TRIM_Y": (0.0, ParamType.REAL32),
     }
 
 
@@ -124,6 +130,7 @@ class FakeVehicleConfig:
     """PARAM_SET for these names is applied but not echoed."""
     drop_link_after_sets: int | None = None
     """Close the connection right after this many applied PARAM_SETs (link loss)."""
+    calibration: FakeCalibrationConfig = field(default_factory=FakeCalibrationConfig)
     uptime_s: float = 600.0
     """Seconds since 'boot' reported in SYSTEM_TIME when the fake starts."""
     prearm_failures: list[str] = field(default_factory=list[str])
@@ -160,6 +167,7 @@ class FakeVehicle:
         self._lock = threading.Lock()
         self._received: list[Message] = []
         self._param_list_requests = 0
+        self.calibration = FakeCalibration(self, self.config.calibration)
         self._sets_applied = 0
         self._clients: list[socket.socket] = []
         self._threads: list[threading.Thread] = []
@@ -210,12 +218,14 @@ class FakeVehicle:
         try:
             if not cfg.silent:
                 for text in cfg.statustext_on_connect:
-                    self._send_statustext(mav, text)
+                    self.send_statustext(mav, text)
             while not self._stop.is_set():
                 now = time.monotonic()
                 if now >= next_hb and not cfg.silent:
                     self._send_heartbeat(mav, others, gcses)
                     next_hb = now + cfg.heartbeat_interval
+                if not cfg.silent:
+                    self.calibration.tick(mav)
                 try:
                     data = sock.recv(4096)
                 except TimeoutError:
@@ -273,7 +283,7 @@ class FakeVehicle:
                 mavlink.MAV_TYPE_GCS, mavlink.MAV_AUTOPILOT_INVALID, 0, 0, mavlink.MAV_STATE_ACTIVE
             )
 
-    def _send_statustext(
+    def send_statustext(
         self, mav: mavlink.MAVLink, text: str, severity: int = mavlink.MAV_SEVERITY_INFO
     ) -> None:
         mav.statustext_send(severity, text.encode()[:50])
@@ -304,7 +314,7 @@ class FakeVehicle:
             index,
         )
 
-    def _ack(self, mav: mavlink.MAVLink, req: Message, command: int, result: int) -> None:
+    def ack(self, mav: mavlink.MAVLink, req: Message, command: int, result: int) -> None:
         mav.command_ack_send(command, result, 0, 0, req.get_srcSystem(), req.get_srcComponent())
 
     def _send_requested(self, mav: mavlink.MAVLink, msg_id: int) -> bool:
@@ -381,10 +391,19 @@ class FakeVehicle:
         self, mav: mavlink.MAVLink, msg: mavlink.MAVLink_command_long_message
     ) -> None:
         cmd = msg.command
+        if self.calibration.handle_command(mav, msg):
+            return
         if cmd == mavlink.MAV_CMD_REQUEST_MESSAGE:
             msg_id = int(msg.param1)
+            if msg_id in (
+                mavlink.MAVLINK_MSG_ID_MAG_CAL_PROGRESS,
+                mavlink.MAVLINK_MSG_ID_MAG_CAL_REPORT,
+            ):
+                self.ack(mav, msg, cmd, mavlink.MAV_RESULT_ACCEPTED)
+                self.calibration.handle_request(mav, msg_id)
+                return
             if msg_id in self.config.unanswered_message_ids:
-                self._ack(mav, msg, cmd, mavlink.MAV_RESULT_ACCEPTED)
+                self.ack(mav, msg, cmd, mavlink.MAV_RESULT_ACCEPTED)
                 return
             # Like ArduPilot: ACK the request, then send the message itself
             known = msg_id in (
@@ -393,7 +412,7 @@ class FakeVehicle:
                 mavlink.MAVLINK_MSG_ID_SYS_STATUS,
                 mavlink.MAVLINK_MSG_ID_GPS_RAW_INT,
             ) or (msg_id == mavlink.MAVLINK_MSG_ID_SIMSTATE and self.config.simulated)
-            self._ack(
+            self.ack(
                 mav, msg, cmd, mavlink.MAV_RESULT_ACCEPTED if known else mavlink.MAV_RESULT_FAILED
             )
             if known:
@@ -401,16 +420,16 @@ class FakeVehicle:
         elif cmd == mavlink.MAV_CMD_RUN_PREARM_CHECKS:
             # Like ArduPilot (GCS_Common.cpp): refused while armed, else report failures
             if self.config.armed:
-                self._ack(mav, msg, cmd, mavlink.MAV_RESULT_TEMPORARILY_REJECTED)
+                self.ack(mav, msg, cmd, mavlink.MAV_RESULT_TEMPORARILY_REJECTED)
                 return
-            self._ack(mav, msg, cmd, mavlink.MAV_RESULT_ACCEPTED)
+            self.ack(mav, msg, cmd, mavlink.MAV_RESULT_ACCEPTED)
             for reason in self.config.prearm_failures:
-                self._send_statustext(mav, f"PreArm: {reason}", mavlink.MAV_SEVERITY_CRITICAL)
+                self.send_statustext(mav, f"PreArm: {reason}", mavlink.MAV_SEVERITY_CRITICAL)
         elif cmd == mavlink.MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES:
-            self._ack(mav, msg, cmd, mavlink.MAV_RESULT_ACCEPTED)
+            self.ack(mav, msg, cmd, mavlink.MAV_RESULT_ACCEPTED)
             self._send_requested(mav, mavlink.MAVLINK_MSG_ID_AUTOPILOT_VERSION)
         else:
-            self._ack(mav, msg, cmd, mavlink.MAV_RESULT_UNSUPPORTED)
+            self.ack(mav, msg, cmd, mavlink.MAV_RESULT_UNSUPPORTED)
 
     def _handle_param_list(self, mav: mavlink.MAVLink) -> None:
         with self._lock:

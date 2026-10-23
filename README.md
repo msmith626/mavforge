@@ -16,8 +16,9 @@ It does not replace them: there is no console, map, mission planning or flight c
 See [docs/mavproxy.md](docs/mavproxy.md).
 
 > **Status: pre-alpha (0.1.0.dev0).** Parameter changes work, behind a reviewed and
-> approved plan with read-back verification. Calibration is planned; see
-> [docs/roadmap.md](docs/roadmap.md). Nothing MAVForge reports means a vehicle is safe to fly.
+> approved plan with read-back verification. Gyro, level, compass and 6-position accel
+> calibration work as verified state machines; see [docs/calibration.md](docs/calibration.md).
+> Nothing MAVForge reports means a vehicle is safe to fly.
 
 ## What works today
 
@@ -32,6 +33,7 @@ See [docs/mavproxy.md](docs/mavproxy.md).
 | Diagnose: classified findings (fault / warning / suspected / not checked / passed) from vehicle pre-arm reports, sensor health and ArduPilot configuration rules | `vehicle.diagnose()` | `mavforge diagnose` | `diagnose` | fake vehicle, ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
 | List backups | `mavforge.list_backups()` | `mavforge params backups` | `params_backups` | fake vehicle |
 | Change parameters: plan (validated against firmware metadata), human approval, backup, write, read-back verification | `vehicle.params.plan()`, `mavforge.approve_plan()`, `vehicle.params.apply()` | `mavforge params set`, `params plan`, `approve`, `params apply`, `params plans` | `params_plan`, `params_apply`, `params_plans` (with `--allow-configure`) | fake vehicle (incl. rejected, clamped, ignored writes, link loss), ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
+| Calibrate: gyro, level, onboard compass, 6-position accelerometer (guided, approved, evidence-based success) | `vehicle.calibration.request()/start()/status()/confirm()/cancel()` | `mavforge calibrate gyro\|level\|compass\|accel\|list` | `calibration_procedures`, `calibration_request`, `calibration_start`, `calibration_status`, `calibration_cancel` (with `--allow-calibrate`; accel not via MCP) | fake vehicle, ArduCopter 4.7.2 SITL (all four) |
 | Restore from a backup (identity-checked) | `vehicle.params.plan_restore()` | `mavforge params restore` | `params_plan_restore` | fake vehicle, ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
 | List operations and permissions | `mavforge.capabilities()` | `mavforge capabilities` | `mavforge_capabilities` | unit tests |
 
@@ -76,6 +78,10 @@ uv run mavforge params diff known-good.param --against <backup-id>   # offline
 # Change parameters: shows the plan and asks before writing; verifies by read-back
 uv run mavforge -c tcp:127.0.0.1:5760 params set BATT_FS_LOW_ACT=2 ARMING_CHECK=1
 uv run mavforge -c tcp:127.0.0.1:5760 params restore <pre-change-backup-id>   # undo
+
+# Calibrate: shows what you'll need to do, asks, then guides you live
+uv run mavforge calibrate list
+uv run mavforge -c /dev/ttyACM0 calibrate compass
 ```
 
 To use a real flight controller over USB, run `mavforge -c /dev/ttyACM0 info`.
@@ -158,7 +164,7 @@ MAVFORGE_HW_CONNECTION=/dev/ttyACM0 uv run pytest -m hardware   # opt-in, read-o
 - [Assessment](docs/assessment.md): project state, positioning and gaps
 - [Research notes](docs/research.md): MAVLink, ArduPilot, Mission Planner and MCP findings, with sources
 - [Architecture](docs/architecture.md) · [Risks](docs/risks.md) · [Roadmap](docs/roadmap.md)
-- [SITL](docs/sitl.md) · [MCP setup](docs/mcp-setup.md) · [MAVForge and MAVProxy](docs/mavproxy.md)
+- [Calibration](docs/calibration.md) · [SITL](docs/sitl.md) · [MCP setup](docs/mcp-setup.md) · [MAVForge and MAVProxy](docs/mavproxy.md)
 - [Contributing](CONTRIBUTING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## License

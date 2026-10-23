@@ -6,7 +6,7 @@ import re
 from collections.abc import Sequence
 from fnmatch import fnmatchcase
 
-from mavforge.domain.models import VehicleIdentity
+from mavforge.domain.models import CalibrationKind, VehicleIdentity
 from mavforge.platforms.ardupilot.metadata import load_metadata
 from mavforge.platforms.ardupilot.rules import RULES
 from mavforge.platforms.base import Capability, PlatformAdapter
@@ -90,6 +90,9 @@ class ArduPilotAdapter(PlatformAdapter):
         if not mapping:
             return None
         return mapping.get(heartbeat.custom_mode, f"MODE_{heartbeat.custom_mode}")
+
+    def supported_calibrations(self) -> frozenset[CalibrationKind]:
+        return frozenset(CalibrationKind)
 
     def param_rules(self) -> Sequence[ParamRule]:
         return RULES

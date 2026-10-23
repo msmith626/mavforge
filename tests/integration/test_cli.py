@@ -85,7 +85,9 @@ def test_capabilities_needs_no_connection() -> None:
     assert code == ExitCode.OK
     ops = {op["name"]: op for op in json.loads(stdout)["operations"]}
     assert ops["params_get"]["available"] is True
-    assert ops["calibrate"]["available"] is False
+    assert ops["calibrate"]["available"] is True
+    assert ops["calibrate"]["modifies_vehicle"] is True
+    assert ops["calibrate"]["permission"] == "calibrate"
 
 
 def test_backup_and_diff_human_output(make_fake: FakeFactory, tmp_path: Path) -> None:
@@ -213,3 +215,46 @@ def test_restore_via_cli(fake: FakeVehicle) -> None:
         "outcome": "verified",
         "detail": "Verified by read back",
     }
+
+
+def test_calibrate_gyro_cli(fake: FakeVehicle) -> None:
+    code, stdout, stderr = invoke("-c", fake.connection_string, "calibrate", "gyro", "--yes")
+    assert code == ExitCode.OK, stderr
+    assert "Before you start" in stderr  # the procedure is shown first
+    assert "gyro calibration: succeeded" in stdout
+    assert "INS_GYROFFS_X" in stdout
+
+
+def test_calibrate_accel_cli_prompts_for_each_pose(fake: FakeVehicle) -> None:
+    result = runner.invoke(
+        app,
+        ["-c", fake.connection_string, "calibrate", "accel"],
+        input="y\n" + "\n" * 6,
+        env={"MAVFORGE_CONNECTION": None},
+    )
+    assert result.exit_code == ExitCode.OK, result.output
+    assert result.stderr.count("Press Enter when the vehicle is in position") == 6
+    assert "on its BACK" in result.stderr
+    assert "accel calibration: succeeded" in result.stdout
+
+
+def test_calibrate_declined_sends_nothing(fake: FakeVehicle) -> None:
+    result = runner.invoke(
+        app,
+        ["-c", fake.connection_string, "calibrate", "level"],
+        input="n\n",
+        env={"MAVFORGE_CONNECTION": None},
+    )
+    assert result.exit_code == ExitCode.FAILED
+    assert not any(
+        isinstance(m, mavlink.MAVLink_command_long_message)
+        and m.command == mavlink.MAV_CMD_PREFLIGHT_CALIBRATION
+        for m in fake.received
+    )
+
+
+def test_calibrate_list_needs_no_vehicle() -> None:
+    code, stdout, _ = invoke("--json", "calibrate", "list")
+    assert code == ExitCode.OK
+    kinds = [p["kind"] for p in json.loads(stdout)["procedures"]]
+    assert kinds == ["gyro", "level", "compass", "accel"]

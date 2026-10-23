@@ -3,6 +3,7 @@
 from mavforge.api import (
     Vehicle,
     approve_plan,
+    calibration_procedures,
     capabilities,
     connect,
     diff_backups,
@@ -20,6 +21,7 @@ __all__ = [
     "Policy",
     "Vehicle",
     "approve_plan",
+    "calibration_procedures",
     "capabilities",
     "connect",
     "diff_backups",

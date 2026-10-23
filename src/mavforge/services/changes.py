@@ -312,7 +312,7 @@ def plan_restore(
 # -- applying -----------------------------------------------------------------------
 
 
-def _same_vehicle(planned: VehicleIdentity, actual: VehicleIdentity) -> list[str]:
+def same_vehicle_problems(planned: VehicleIdentity, actual: VehicleIdentity) -> list[str]:
     problems: list[str] = []
     if (planned.system_id, planned.component_id) != (actual.system_id, actual.component_id):
         problems.append("different system/component ID")
@@ -354,7 +354,7 @@ def apply_plan(session: Session, plan_ref: str | Path) -> ApplyResult:
                 f"review and approve it, e.g. `mavforge approve {plan.plan_id}`.",
                 details={"plan_id": plan.plan_id},
             )
-        if problems := _same_vehicle(plan.vehicle, session.identity):
+        if problems := same_vehicle_problems(plan.vehicle, session.identity):
             raise NotPermittedError(
                 f"Plan {plan.plan_id} was made for a different vehicle: {', '.join(problems)}",
                 details={"plan_id": plan.plan_id},

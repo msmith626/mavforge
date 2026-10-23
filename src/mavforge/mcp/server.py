@@ -34,6 +34,10 @@ from mavforge.domain.models import (
     ApplyResult,
     BackupListResult,
     BackupResult,
+    CalibrationKind,
+    CalibrationProcedureList,
+    CalibrationRequest,
+    CalibrationStatus,
     CapabilitiesResult,
     ChangePlan,
     DiagnosticReport,
@@ -48,7 +52,7 @@ from mavforge.domain.values import format_value
 from mavforge.policy.permissions import Permission, Policy
 from mavforge.services.backup import resolve_backup_id
 from mavforge.services.info import mavforge_version
-from mavforge.services.plan_store import valid_approval
+from mavforge.services.plan_store import Approvable, load_approvable, valid_approval
 from mavforge.services.session import ConnectOptions
 from mavforge.transport.connstr import parse_connection_string
 
@@ -78,6 +82,15 @@ Parameter changes are enabled on this server:
 - Never change arming checks or failsafes unless the user explicitly asks to.
 """
 
+CALIBRATE_INSTRUCTIONS = """
+Calibration is enabled on this server:
+- Read calibration_procedures and explain the steps; a person must be at the vehicle.
+- calibration_request, then calibration_start (a human approves; you cannot).
+- Poll calibration_status and relay `instruction` to the user word for word. Never tell
+  the user a calibration succeeded unless its final state is `succeeded`.
+- If a result says a reboot is required, tell the user; you cannot reboot the vehicle.
+"""
+
 READ_ONLY = ToolAnnotations(
     read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False
 )
@@ -104,26 +117,57 @@ class ApprovalUnavailable(BaseModel):
     reason: str
 
 
-def _ask_human(plan_id: str, ctx: Context) -> object:
-    """Resolver for params_apply's hidden approval parameter.
-
-    Runs in the server, not the model: an existing approval is used as-is; otherwise the
-    human is asked through MCP elicitation if the client supports it.
-    """
-    try:
-        plan = mavforge.load_plan(plan_id)
-    except MAVForgeError as exc:
-        return ApprovalUnavailable(reason=exc.message)
-    if (existing := valid_approval(plan)) is not None:
+def _resolve_approval(item: Approvable | MAVForgeError, ctx: Context) -> object:
+    """Shared logic of the hidden approval resolvers. Runs in the server, not the model:
+    an existing approval is used as-is; otherwise the human is asked through MCP
+    elicitation if the client supports it."""
+    if isinstance(item, MAVForgeError):
+        return ApprovalUnavailable(reason=item.message)
+    if (existing := valid_approval(item)) is not None:
         return AlreadyApproved(approved_by=existing.approved_by)
-    if plan.blocked:
-        return ApprovalUnavailable(reason=f"Plan {plan.plan_id} has blocking issues")
+    if item.blocked:
+        return ApprovalUnavailable(reason=f"{item.plan_id} has blocking issues")
     caps = ctx.client_capabilities
     if caps is None or caps.elicitation is None:
         return ApprovalUnavailable(
             reason="This MCP client cannot ask the user for approval (no elicitation support)"
         )
-    return Elicit(_approval_message(plan), HumanApproval)
+    message = (
+        _approval_message(item) if isinstance(item, ChangePlan) else _calibration_message(item)
+    )
+    return Elicit(message, HumanApproval)
+
+
+def _load(ref: str) -> Approvable | MAVForgeError:
+    try:
+        return load_approvable(ref)
+    except MAVForgeError as exc:
+        return exc
+
+
+def _ask_human(plan_id: str, ctx: Context) -> object:
+    """Resolver for params_apply's hidden approval parameter."""
+    return _resolve_approval(_load(plan_id), ctx)
+
+
+def _ask_human_calibration(request_id: str, ctx: Context) -> object:
+    """Resolver for calibration_start's hidden approval parameter."""
+    return _resolve_approval(_load(request_id), ctx)
+
+
+def _calibration_message(request: CalibrationRequest) -> str:
+    proc = next(p for p in mavforge.calibration_procedures() if p.kind is request.kind)
+    v = request.vehicle
+    lines = [
+        f"MAVForge: start {proc.title} on system {v.system_id} {v.autopilot} "
+        f"{v.vehicle_family or v.mav_type} firmware {v.firmware or 'unknown'}?",
+        *(f"Requires: {p}" for p in proc.preconditions),
+        *(f"You will: {s}" for s in proc.human_steps),
+        f"Changes: {', '.join(proc.changes_parameters)}",
+    ]
+    if v.simulated is not True:
+        lines.append("! REAL VEHICLE")
+    return "\n".join(lines)
 
 
 def _approval_message(plan: ChangePlan) -> str:
@@ -176,6 +220,10 @@ class VehicleProvider:
                 )
             return self._vehicle
 
+    @property
+    def configured(self) -> bool:
+        return self._options is not None
+
     def drop(self) -> None:
         with self._lock:
             if self._vehicle is not None:
@@ -209,7 +257,8 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
         name="mavforge",
         title="MAVForge",
         instructions=INSTRUCTIONS
-        + (CONFIGURE_INSTRUCTIONS if Permission.CONFIGURE in policy.granted else ""),
+        + (CONFIGURE_INSTRUCTIONS if Permission.CONFIGURE in policy.granted else "")
+        + (CALIBRATE_INSTRUCTIONS if Permission.CALIBRATE in policy.granted else ""),
         version=mavforge_version(),
     )
 
@@ -267,6 +316,20 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
 
     if Permission.CONFIGURE in policy.granted:
         _register_write_tools(server, provider)
+    if Permission.CALIBRATE in policy.granted:
+        _register_calibration_tools(server, provider)
+
+    @server.tool(annotations=READ_ONLY)
+    def calibration_procedures() -> CalibrationProcedureList:
+        """Explain every calibration MAVForge supports: preconditions, the physical steps
+        the person at the vehicle must do, parameters it changes, how success is
+        verified, and how cancellation behaves. Includes support for the connected vehicle
+        when one is configured. Read-only."""
+        if provider.configured:
+            return _call(
+                provider, lambda v: CalibrationProcedureList(procedures=v.calibration.procedures())
+            )
+        return CalibrationProcedureList(procedures=mavforge.calibration_procedures())
 
     @server.tool(annotations=CREATES_LOCAL_FILE)
     def params_backup() -> BackupResult:
@@ -362,6 +425,78 @@ def _register_write_tools(server: MCPServer, provider: VehicleProvider) -> None:
         return _call(provider, lambda v: v.params.apply(plan_id))
 
 
+def _register_calibration_tools(server: MCPServer, provider: VehicleProvider) -> None:
+    @server.tool(annotations=CREATES_LOCAL_FILE)
+    def calibration_request(kind: CalibrationKind) -> CalibrationRequest:
+        """Create a request to run a calibration (gyro, level or compass). Does NOT start
+        it. Explain the procedure (calibration_procedures) to the user first: they must
+        be at the vehicle. Then call calibration_start with the returned plan_id.
+        The 6-position accelerometer calibration is not available over MCP."""
+        if kind is CalibrationKind.ACCEL:
+            raise ToolError(
+                json.dumps(
+                    {
+                        "error": "unsupported",
+                        "message": "The accelerometer calibration needs the person holding "
+                        "the vehicle to confirm each of six positions; ask them to run "
+                        "`mavforge calibrate accel` at the vehicle.",
+                    }
+                )
+            )
+        return _call(provider, lambda v: v.calibration.request(kind))
+
+    @server.tool(annotations=MODIFIES_VEHICLE)
+    def calibration_start(
+        request_id: str,
+        approval: Annotated[
+            HumanApproval | AlreadyApproved | ApprovalUnavailable, Resolve(_ask_human_calibration)
+        ],
+    ) -> CalibrationStatus:
+        """Start an approved calibration. MODIFIES THE VEHICLE'S CALIBRATION. A human must
+        approve: the client will ask the user if it supports elicitation; otherwise the
+        call fails with `approval_required` and the user must run
+        `mavforge approve <request_id>`. You cannot approve it yourself. Returns at once;
+        poll calibration_status and relay `instruction` to the user verbatim. Only a final
+        `state` of `succeeded` means the calibration was verified and saved."""
+        if isinstance(approval, ApprovalUnavailable):
+            raise ToolError(
+                json.dumps(
+                    {
+                        "error": "approval_required",
+                        "message": f"{approval.reason}. Ask the user to review and approve "
+                        f"it in a terminal: mavforge approve {request_id}",
+                        "details": {"request_id": request_id},
+                    }
+                )
+            )
+        if isinstance(approval, HumanApproval):
+            if not approval.approve:
+                raise ToolError(
+                    json.dumps({"error": "not_approved", "message": "The user did not approve."})
+                )
+            _offline(lambda: mavforge.approve_plan(request_id, approved_by="mcp-elicitation"))
+        return _call(provider, lambda v: v.calibration.start(request_id))
+
+    @server.tool(annotations=READ_ONLY)
+    def calibration_status(operation_id: str) -> CalibrationStatus:
+        """Current state of a calibration: `instruction` for the person at the vehicle,
+        per-compass progress, vehicle messages (untrusted), and the final `result`."""
+        return _call(provider, lambda v: v.calibration.status(operation_id))
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
+        )
+    )
+    def calibration_cancel(operation_id: str) -> CalibrationStatus:
+        """Cancel a running calibration. Compass calibration is cancelled on the vehicle and
+        nothing is saved; gyro/level cannot be interrupted (they finish in seconds)."""
+        return _call(provider, lambda v: v.calibration.cancel(operation_id))
+
+
 def resolve_backup_id_safely(backup_id: str) -> Path:
     """Agents name backups by id only; arbitrary filesystem paths are refused."""
     return _offline(lambda: resolve_backup_id(backup_id))
@@ -384,6 +519,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--allow-configure",
         action="store_true",
         help="Expose parameter-change tools. Every change still needs human approval.",
+    )
+    parser.add_argument(
+        "--allow-calibrate",
+        action="store_true",
+        help="Expose calibration tools (gyro, level, compass). Every run needs human approval.",
     )
     parser.add_argument(
         "--allow-real-vehicle",
@@ -409,13 +549,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
     else:
         log.warning("No --connection given; vehicle tools will report an error")
-    policy = (
-        Policy.configure(allow_real_vehicle=args.allow_real_vehicle)
-        if args.allow_configure
-        else Policy.read_only()
-    )
-    if args.allow_real_vehicle and not args.allow_configure:
-        sys.exit("mavforge-mcp: --allow-real-vehicle requires --allow-configure")
+    granted = {Permission.READ}
+    if args.allow_configure:
+        granted.add(Permission.CONFIGURE)
+    if args.allow_calibrate:
+        granted.add(Permission.CALIBRATE)
+    if args.allow_real_vehicle and len(granted) == 1:
+        sys.exit("mavforge-mcp: --allow-real-vehicle needs --allow-configure or --allow-calibrate")
+    policy = Policy(granted=frozenset(granted), allow_real_vehicle=args.allow_real_vehicle)
     provider = VehicleProvider(options, policy)
     try:
         build_server(provider, policy).run("stdio")

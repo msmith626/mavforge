@@ -8,7 +8,7 @@
 | 4 | Link lost during a write; parameter batches are not atomic | Medium / High | Record before / requested / after values per parameter; `unknown` status on timeout; read-back verification; no blind retries of non-idempotent commands | Done: per-parameter outcomes, link-loss test, drift skip, pre-change backup |
 | 5 | Float encoding rounds large int32 parameters | Low / Medium | `precision_limited` flag; type-aware comparisons in diff and verify | Flag done |
 | 6 | Parameter names or semantics change between firmware versions (e.g. 4.7 `SYSID_THISMAV` → `MAV_SYSID`) | High / Medium | Metadata keyed by firmware version; restore blocked on identity or firmware mismatch unless explicitly overridden with warnings | Done: metadata keyed by exact firmware (fallback flagged); restore identity gate |
-| 7 | Calibration reported as successful when it wasn't | Medium / High | Require a terminal vehicle signal **and** a parameter read-back postcondition | Planned (see research.md) |
+| 7 | Calibration reported as successful when it wasn't | Medium / High | Require a terminal vehicle signal **and** a parameter read-back postcondition | Done: per-workflow evidence ([calibration.md](calibration.md)); compass offsets must match the reported values |
 | 8 | MCP SDK v2 and spec 2026-07-28 are new | Medium / Low | Spike-tested; MCP layer kept thin; dependency pinned `mcp>=2.3,<3` | Done |
 | 9 | Network-exposed MCP server | Low / High | stdio only for now. HTTP will bind to localhost by default with a warning; OAuth resource-server work only if remote use is requested | stdio only |
 | 10 | Licensing: accidental copying from GPL or unlicensed sources | Low / Medium | MAVForge is GPL-3.0-or-later, compatible with pymavlink (LGPLv3) and ArduPilot / MP / MAVProxy (GPLv3). Prefer independent implementation; record any adaptation in THIRD_PARTY_NOTICES. Download apm.pdef metadata at runtime rather than vendoring it | No third-party code copied |
@@ -17,3 +17,5 @@
 | 13 | Stray stdout output corrupting MCP stdio | Low / Medium | MCP SDK v2 diverts fd 1; logging goes to stderr | Done; stdio tests |
 | 14 | pymavlink TCP EOF handling prints to stdout and never reports the loss | Found / High | Transport converts TCP EOF/reset into a link failure; regression test | Done |
 | 15 | Metadata downloaded from the network is untrusted | Low / Medium | HTTPS only, 32 MB cap, defusedxml (entity attacks rejected, tested), cache under the state dir, `--offline` | Done |
+| 16 | An agent confirming a physical calibration step that never happened | Medium / High | The 6-pose accel calibration is refused for MCP in the service layer; MCP has no confirm tool; human approval is needed to start any calibration | Done |
+| 17 | Cancel claims that don't hold (accel calibration cannot be cancelled over MAVLink) | Medium / Medium | The result states the autopilot stays in calibration mode until rebooted | Done |

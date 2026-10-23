@@ -13,7 +13,8 @@ import socket
 import subprocess
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -54,22 +55,49 @@ def _wait_for_vehicle(connection: str, timeout: float) -> None:
             time.sleep(0.5)
 
 
-@pytest.fixture(scope="session")
-def sitl_connection() -> Iterator[str]:
-    """Connection string for a fresh ArduCopter SITL (wiped EEPROM) for this session."""
-    if external := os.environ.get("MAVFORGE_SITL_CONNECTION"):
-        yield external
-        return
+@contextmanager
+def _sitl_container(*args: str) -> Generator[str]:
+    """Run the SITL image (optionally with arducopter arguments) and yield its link."""
     if shutil.which("docker") is None:
         pytest.skip("Docker not available and MAVFORGE_SITL_CONNECTION not set")
     if _docker("image", "inspect", SITL_IMAGE, check=False).returncode != 0:
         _docker("build", "-t", SITL_IMAGE, str(DOCKER_CONTEXT))
     port = _free_port()
     name = f"mavforge-sitl-{uuid.uuid4().hex[:8]}"
-    _docker("run", "-d", "--rm", "--name", name, "-p", f"127.0.0.1:{port}:5760", SITL_IMAGE)
+    _docker("run", "-d", "--rm", "--name", name, "-p", f"127.0.0.1:{port}:5760", SITL_IMAGE, *args)
     try:
         connection = f"tcp:127.0.0.1:{port}"
         _wait_for_vehicle(connection, BOOT_TIMEOUT)
         yield connection
     finally:
         _docker("rm", "-f", name, check=False)
+
+
+@pytest.fixture(scope="session")
+def sitl_connection() -> Iterator[str]:
+    """Connection string for a fresh ArduCopter SITL (wiped EEPROM) for this session."""
+    if external := os.environ.get("MAVFORGE_SITL_CONNECTION"):
+        yield external
+        return
+    with _sitl_container() as connection:
+        yield connection
+
+
+@pytest.fixture(scope="module")
+def sitl_calibration_connection() -> Iterator[str]:
+    """ArduCopter SITL using the 'calibration' model, whose attitude and rotation can be
+    driven through SERVO5-8 (libraries/SITL/SIM_Calibration.cpp), as ArduPilot's autotest
+    does for accelerometer and compass calibration."""
+    with _sitl_container(
+        "--model",
+        "calibration",
+        "--speedup",
+        "1",
+        "-I0",
+        "-w",
+        "--home",
+        "-35.363262,149.165237,584,353",
+        "--defaults",
+        "/opt/ardupilot/copter.parm",
+    ) as connection:
+        yield connection

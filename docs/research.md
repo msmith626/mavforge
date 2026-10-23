@@ -208,3 +208,28 @@ These are the sources for the ArduPilot rules in `platforms/ardupilot/rules.py`.
 
   [verified]
 - **MCP elicitation, `mcp` 2.3.0.** A tool parameter annotated `Annotated[..., Resolve(fn)]` is left out of the tool's input schema and is filled by the server-side resolver. An agent-supplied argument with the same name is ignored. A client without elicitation support can be detected through `ctx.client_capabilities.elicitation` and given a fallback. A declined elicitation aborts the call. [verified with spike and tests]
+
+## Calibration behaviour verified
+
+These were checked against ArduCopter 4.7.2 SITL. The source was read at tag `Plane-4.6.2`.
+
+- **Gyro and level run synchronously.**
+  - Both run inside `MAV_CMD_PREFLIGHT_CALIBRATION`, with `EXPECT_DELAY_MS(30000)`, and the ACK comes only when they finish.
+  - Level calls `calibrate_gyros()` first. It returns `TEMPORARILY_REJECTED` within 5 s of a previous accelerometer calibration (`last_accel_cal_ms`).
+  - Both passed in SITL. [verified]
+- **Compass messages are not streamed to MAVForge.** Without stream configuration, `MAG_CAL_PROGRESS`/`MAG_CAL_REPORT` never arrived on the link. `MAV_CMD_REQUEST_MESSAGE` for 191/192 returns them. [verified]
+- **One report request returns every finished compass.** `Compass::send_mag_cal_report()` loops over all instances and sends one report per finished compass. A single request therefore yields up to three reports, beginning after the last one sent.
+  - Taking only the first reply returned the same compass every time.
+  - Fixed by collecting from a subscription.
+  - The fake vehicle now reproduces the loop, and a regression test covers it. [verified]
+- **With autosave off, nothing is saved until accepted.** After every compass reported `MAG_CAL_SUCCESS`, `COMPASS_OFS*` were unchanged until `DO_ACCEPT_MAG_CAL`, after which they matched the reported offsets. [verified]
+- **Status names differ between pymavlink and ArduPilot.** pymavlink's `MAG_CAL_STATUS` names statuses 6 and 7 `FAILED_ORIENTATION` and `FAILED_RADIUS`; ArduPilot's `CompassCalibrator` calls them `BAD_ORIENTATION` and `BAD_RADIUS`. Statuses 8–10 exist in the dialect but are not produced by ArduPilot 4.6.2. [verified locally]
+- **Accelerometer calibration cannot be cancelled remotely.**
+  - The vehicle sends `ACCELCAL_VEHICLE_POS` with target 0/0 at 1 Hz while it waits.
+  - Its reply to the GCS echo comes from `handle_command_accelcal_vehicle_pos`.
+  - `AP_AccelCal::cancel()` is only reached on arming (`AP_InertialSensor::acal_update`). There is no MAVLink cancel, and waiting for a pose has no timeout.
+  - The full 6-pose run passed in SITL with the `calibration` model. [verified]
+- **SITL `calibration` model.**
+  - In `libraries/SITL/SIM_Calibration.cpp`, `SERVO5` selects the mode: 1150 attitude, 1250 autonomous compass-calibration rotation, ≥1300 angular velocity. `SERVO6`–`8` set the attitude.
+  - `DO_SET_SERVO` works because `SERVO5_FUNCTION=0`.
+  - MAVForge's SITL tests use this only to act as the person at the vehicle. [verified]

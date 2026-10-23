@@ -83,11 +83,15 @@ PARAMS_APPLY = OperationSpec(
     True,
 )
 
-_PLANNED = [
-    OperationSpec(
-        "calibrate", "Deterministic calibration workflows.", Permission.CALIBRATE, True, False
-    ),
-]
+CALIBRATE = OperationSpec(
+    "calibrate",
+    "Run an approved calibration (gyro, level, compass, 6-position accel) as a state "
+    "machine with evidence-based success.",
+    Permission.CALIBRATE,
+    True,
+)
+
+_PLANNED: list[OperationSpec] = []
 
 CATALOG: list[OperationSpec] = [
     INFO,
@@ -99,6 +103,7 @@ CATALOG: list[OperationSpec] = [
     DIAGNOSE,
     PARAMS_PLAN,
     PARAMS_APPLY,
+    CALIBRATE,
     *_PLANNED,
 ]
 

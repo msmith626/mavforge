@@ -88,6 +88,16 @@
      `not_attempted`.
   4. **Restore** is a plan built from a backup's non-volatile differences. It is refused
      if the backup's identity or firmware doesn't match, unless explicitly overridden.
+- **Calibration** (`services/calibration/`; details in [calibration.md](calibration.md)):
+  - Each workflow is a state machine (`Workflow`), run by an `OperationRegistry` in a
+    background thread.
+  - It starts from an approved, single-use `CalibrationRequest`, under the same gates
+    as parameter changes, plus one calibration at a time.
+  - A `WorkflowContext` carries the person's `instruction`, an atomic step
+    confirmation, cancellation, and live status.
+  - Success requires the vehicle's terminal signal and a parameter read-back.
+  - Workflows that need physical confirmations (accel) are refused for MCP-initiated
+    runs in the service layer.
 - **Untrusted vehicle text.**
   - The CLI renders vehicle-originated text inertly: no rich markup, and control
     characters are replaced.

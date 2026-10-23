@@ -14,6 +14,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from mavforge.domain.errors import InvalidInputError
+from mavforge.domain.models import CalibrationKind
 from mavforge.transport.dialect import mavlink
 
 if TYPE_CHECKING:
@@ -48,6 +49,10 @@ class PlatformAdapter(ABC):
 
     @abstractmethod
     def mode_name(self, heartbeat: mavlink.MAVLink_heartbeat_message) -> str | None: ...
+
+    def supported_calibrations(self) -> frozenset[CalibrationKind]:
+        """Calibration workflows implemented and tested for this platform."""
+        return frozenset()
 
     def param_rules(self) -> Sequence[ParamRule]:
         """Platform-specific configuration rules used by diagnostics."""

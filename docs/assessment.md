@@ -20,7 +20,7 @@ Cells for other tools come from reading their source and documentation
 | Parameter writes verified by value read-back | yes | name echo only (pymavlink `mavset`) | name echo only | not assessed | not assessed |
 | Backups bound to vehicle and firmware identity | yes | no | no | not assessed | no |
 | Plan → approve → apply, with audit log | yes | no | no | records a reason per change | `confirm` flags |
-| Calibration as deterministic state machines with evidence | planned | relays prompts | UI-driven | no | no |
+| Calibration as deterministic state machines with evidence | yes (gyro, level, compass, accel) | relays prompts | UI-driven | no | no |
 | AI agent access under a shared policy | yes (read-only so far) | no | no | no | yes, but flight-oriented |
 | Missions, maps, flight control, arming | **no, by design** | yes | yes | no | yes |
 | License | GPL-3.0-or-later | GPLv3 | GPLv3 | GPL-3.0-or-later | MIT or GPL-3.0 |
@@ -60,13 +60,15 @@ station.
 - Diagnostics (M3).
 - Parameter changes with approval, verification and restore, plus versioned ArduPilot
   metadata (M4).
+- Calibration (M5): gyro, level, onboard compass and 6-position accelerometer.
 
 See [roadmap.md](roadmap.md).
 
 **Not done:**
 - MAVFTP parameter download.
 - More diagnostic rules.
-- Calibration workflows.
+- Radio, barometer and ESC calibration.
+- Hardware validation of calibration.
 - Reconnect-aware long operations.
 - HTTP MCP transport.
 - Hardware coverage beyond one board (ArduPlane 4.6.2).

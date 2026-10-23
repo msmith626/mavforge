@@ -48,6 +48,18 @@ the agent's input schema. MAVForge fills it on the server side:
 An approval supplied by the agent as an argument is ignored; tests check this.
 Writes to a vehicle not identified as a simulator also need `--allow-real-vehicle`.
 
+### Calibration tools (opt-in)
+
+`calibration_procedures` is always available and read-only. The tools below are
+registered only when the server is started with `--allow-calibrate`.
+
+| Tool | Purpose |
+|---|---|
+| `calibration_request` | Create a request for gyro, level or compass calibration. The accelerometer calibration is refused: each pose must be confirmed by the person at the vehicle |
+| `calibration_start` | Start an **approved** request. Uses the same hidden approval as `params_apply` |
+| `calibration_status` | Poll the instruction for the person, per-compass progress, and the final result |
+| `calibration_cancel` | Cancel. Compass calibration is cancelled on the vehicle, and nothing is saved |
+
 ## Running
 
 ```sh
@@ -56,6 +68,7 @@ uv run mavforge-mcp --connection /dev/ttyACM0             # USB flight controlle
 uv run mavforge-mcp --connection udpin:127.0.0.1:14551    # behind MAVProxy, see mavproxy.md
 uv run mavforge-mcp --connection tcp:127.0.0.1:5760 --allow-configure          # SITL changes
 uv run mavforge-mcp --connection /dev/ttyACM0 --allow-configure --allow-real-vehicle
+uv run mavforge-mcp --connection tcp:127.0.0.1:5760 --allow-calibrate
 ```
 
 - **Connection:** you can also set it with `MAVFORGE_CONNECTION`. `--target-system`

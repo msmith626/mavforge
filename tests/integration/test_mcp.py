@@ -24,6 +24,7 @@ TOOLS = {
     "params_backups",
     "params_diff",
     "diagnose",
+    "calibration_procedures",
 }
 CREATES_FILES = {"params_backup"}
 

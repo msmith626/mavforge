@@ -11,19 +11,16 @@ Capabilities are claimed only once they are tested.
 | **M3 (done)** | `diagnose`: vehicle pre-arm reasons (`RUN_PREARM_CHECKS`), SYS_STATUS sensor health, recent-boot warning, ArduPilot rules (arming checks, accel/compass/RC calibration, throttle and battery failsafes, GPS, logging, frame class) with certainty classes; API, CLI (`--fail-on`) and MCP | Unit rule tests, fake-vehicle scenarios incl. the bench plane, parity, SITL; run on ArduPlane 4.6.2 hardware |
 | 3. Diagnostics (remaining) | More rules, each sourced from firmware or metadata: servo/motor output functions, airspeed setup for planes, serial-port protocol conflicts, failsafe thresholds vs battery capacity. Optional comparison against a saved baseline inside the report. Findings that propose a parameter plan (never auto-applied) | Rule unit tests; SITL with induced faults (SIM_* params) produces the expected findings |
 | **M4 (done)** | Parameter changes: plan (type, bounds, versioned `apm.pdef` metadata, safety notes) → human approval (CLI prompt / `mavforge approve` / MCP elicitation; digest-bound, expiring, single-use) → apply (policy, identity, disarmed, fail-closed audit, pre-change backup, drift skip, write + read-back) → per-parameter outcomes; restore from backup with identity gate; MCP write tools behind `--allow-configure` / `--allow-real-vehicle` | Fault-injection tests (rejected, clamped, ignored writes, link loss, drift, tamper, expiry, forgery); parity; SITL write+restore; consented write+restore on ArduPlane 4.6.2 |
-| 4. Calibration | State machines, in order: gyro → level/trim → 6-pose accel → onboard compass → radio. ESC deferred. Per-workflow spec docs; operation registry with cancel; human-step prompts (interactive CLI; MCP poll + elicitation) | Fake-vehicle tests for success / fail / cancel / timeout per state; SITL `-M calibration` tests for accel and compass |
+| **M5 (done)** | Calibration: gyro, level, onboard compass, 6-position accel as state machines (`services/calibration/`); approved single-use requests; background operations with status/confirm/cancel; evidence-based success; CLI live guidance; MCP behind `--allow-calibrate` (accel CLI/API only) | Fake-vehicle success/failure/cancel/timeout tests, MCP authorization tests, parity, all four passing on ArduCopter 4.7.2 SITL |
+| 4. Calibration (remaining) | Radio (RC) calibration (GCS-side min/max/trim sweep, written through a change plan); large-vehicle MagCal (`MAV_CMD_FIXED_MAG_CAL_YAW`); barometer; ESC deferred (high risk). Hardware validation of the existing workflows | Same test levels; hardware runs with the owner present |
 | 5. Hardening | Reconnect during long operations, wrong-vehicle tests, security review, MCP authorization tests, localhost HTTP transport | Security checklist complete; parity tests cover every write path |
 | 6. Release | API / CLI / MCP reference docs, compatibility matrix backed by test evidence, 0.1.0 | Fresh-clone quick start verified |
 
 ## Next milestone
 
-Calibration (Phase 4), starting with the workflows that need no physical handling:
-1. Gyro, with a state machine and evidence-based success.
-2. Level/trim.
-3. Onboard compass calibration: `MAG_CAL_PROGRESS`/`REPORT`, success only on
-   `MAG_CAL_SUCCESS`, then a parameter read-back.
-4. The 6-pose accelerometer calibration, with human prompts between poses.
+Pick one of these:
 
-Each workflow runs as an operation that can be cancelled, gets a spec document, and has
-fake-vehicle and SITL `-M calibration` tests. Your plane's compass is the obvious first
-hardware candidate.
+- **Hardware validation of calibration** on your ArduPlane 4.6.2 board: compass first,
+  since it's the board's remaining diagnose fault, then gyro.
+- **Radio calibration**, implemented as a guided sweep that produces a change plan.
+- **Hardening:** reconnect during long operations, and the localhost HTTP MCP transport.

@@ -19,7 +19,7 @@ class Permission(StrEnum):
     CONFIGURE = "configure"
     """Change parameters through reviewed, approved and verified plans."""
     CALIBRATE = "calibrate"
-    """Run calibration workflows. Not yet implemented."""
+    """Run approved calibration workflows (they rewrite calibration parameters)."""
     MAINTENANCE = "maintenance"
     """Reboot and similar maintenance actions. Not yet implemented."""
 
@@ -36,9 +36,16 @@ class Policy:
         return cls()
 
     @classmethod
-    def configure(cls, *, allow_real_vehicle: bool) -> Policy:
+    def configure(cls, *, allow_real_vehicle: bool, calibrate: bool = False) -> Policy:
+        granted = {Permission.READ, Permission.CONFIGURE}
+        if calibrate:
+            granted.add(Permission.CALIBRATE)
+        return cls(granted=frozenset(granted), allow_real_vehicle=allow_real_vehicle)
+
+    @classmethod
+    def calibrate(cls, *, allow_real_vehicle: bool) -> Policy:
         return cls(
-            granted=frozenset({Permission.READ, Permission.CONFIGURE}),
+            granted=frozenset({Permission.READ, Permission.CALIBRATE}),
             allow_real_vehicle=allow_real_vehicle,
         )
 

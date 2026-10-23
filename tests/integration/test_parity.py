@@ -220,3 +220,67 @@ def test_apply_parity(make_fake: FakeFactory) -> None:
         provider.close()
     assert normalize(results[0]) == normalize(results[1]) == normalize(results[2])
     assert {r["approved_by"] for r in results} == {"api", "cli-yes-flag", "mcp-elicitation"}
+
+
+def test_calibration_parity(make_fake: FakeFactory) -> None:
+    """Gyro calibration through the API, CLI and MCP produces the same verified result."""
+    import time as _time
+
+    from mcp_types import ElicitResult
+
+    def essence(st: dict[str, Any]) -> Any:
+        r = st["result"]
+        return (
+            st["kind"],
+            st["state"],
+            r["status"],
+            r["summary"],
+            r["evidence"],
+            r["params_after"],
+        )
+
+    results: list[dict[str, Any]] = []
+    policy = Policy.calibrate(allow_real_vehicle=False)
+    fake = make_fake()
+    with mavforge.connect(fake.connection_string, policy=policy) as v:
+        request = v.calibration.request("gyro")
+        mavforge.approve_plan(request)
+        op = v.calibration.start(request).operation_id
+        results.append(json.loads(v.calibration.wait(op, 10).model_dump_json()))
+
+    fake = make_fake()
+    cli = CliRunner().invoke(
+        app, ["-c", fake.connection_string, "--json", "calibrate", "gyro", "-y"]
+    )
+    results.append(json.loads(cli.stdout))
+
+    fake = make_fake()
+    provider = VehicleProvider(ConnectOptions(connection=fake.connection_string), policy)
+
+    async def accept(ctx: Any, params: Any) -> ElicitResult:
+        return ElicitResult(action="accept", content={"approve": True})
+
+    async def go() -> Any:
+        callbacks: dict[str, Any] = {"elicitation_callback": accept}
+        async with Client(build_server(provider, policy), **callbacks) as client:
+            req = (
+                await client.call_tool("calibration_request", {"kind": "gyro"})
+            ).structured_content
+            st = (
+                await client.call_tool("calibration_start", {"request_id": req["plan_id"]})
+            ).structured_content
+            while st["state"] not in {"succeeded", "failed", "cancelled", "unknown"}:
+                _time.sleep(0.05)
+                st = (
+                    await client.call_tool(
+                        "calibration_status", {"operation_id": st["operation_id"]}
+                    )
+                ).structured_content
+            return st
+
+    try:
+        results.append(anyio.run(go))
+    finally:
+        provider.close()
+    assert essence(results[0]) == essence(results[1]) == essence(results[2])
+    assert results[0]["state"] == "succeeded"

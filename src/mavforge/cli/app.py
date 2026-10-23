@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,11 @@ from mavforge.domain.models import (
     ApplyResult,
     BackupListResult,
     BackupResult,
+    CalibrationKind,
+    CalibrationProcedure,
+    CalibrationProcedureList,
+    CalibrationState,
+    CalibrationStatus,
     CapabilitiesResult,
     ChangeOutcome,
     ChangePlan,
@@ -44,6 +50,7 @@ from mavforge.domain.models import (
 from mavforge.domain.outcomes import OperationStatus, exit_code_for
 from mavforge.domain.values import format_value
 from mavforge.policy.permissions import Policy
+from mavforge.services.calibration.operations import procedures as calibration_procedures
 from mavforge.transport.connection import DEFAULT_SOURCE_COMPONENT, DEFAULT_SOURCE_SYSTEM
 
 EXIT_CODES_HELP = (
@@ -66,6 +73,11 @@ params_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(params_app, name="params")
+calibrate_app = typer.Typer(
+    help="Calibrate sensors with guided, verified workflows (asks before starting).",
+    no_args_is_help=True,
+)
+app.add_typer(calibrate_app, name="calibrate")
 
 out = Console(highlight=False, soft_wrap=True)
 err = Console(stderr=True, highlight=False)
@@ -727,6 +739,149 @@ def params_diff(
     if against is not None:
         _offline(ctx, lambda: mavforge.diff_backups(baseline, against), render)
     _with_vehicle(ctx, lambda v: v.params.diff(baseline), render)
+
+
+_CALIBRATE_POLICY = Policy.calibrate(allow_real_vehicle=True)
+
+
+def render_procedure(proc: CalibrationProcedure, console: Console = out) -> None:
+    support = "" if proc.supported else f"  (not available: {proc.reason})"
+    console.print(Text(f"{proc.title} [{proc.kind.value}]{support}", style="bold"))
+    console.print(Text(f"  {proc.summary} Takes {proc.typical_duration}."))
+    console.print(Text("  Before you start:", style="bold"))
+    for item in proc.preconditions:
+        console.print(Text(f"    - {item}"))
+    console.print(Text("  You will:", style="bold"))
+    for item in proc.human_steps:
+        console.print(Text(f"    - {item}"))
+    console.print(Text(f"  Changes: {', '.join(proc.changes_parameters)}"))
+    console.print(Text(f"  Success means: {proc.success_evidence}", style="dim"))
+    console.print(Text(f"  Cancelling: {proc.cancellation}", style="dim"))
+
+
+def render_procedures(procs: list[CalibrationProcedure]) -> None:
+    for proc in procs:
+        render_procedure(proc)
+        out.print()
+
+
+def render_calibration(st: CalibrationStatus) -> None:
+    r = st.result
+    if r is None:
+        out.print(Text(f"Calibration {st.operation_id} is {st.state.value}."))
+        return
+    style = "green" if r.status is OperationStatus.SUCCEEDED else "bold red"
+    out.print(Text(f"{st.kind.value} calibration: {r.status.value}", style=style))
+    out.print(Text(r.summary))
+    for item in r.evidence:
+        out.print(Text(f"  evidence: {item}", style="dim"))
+    changed = {
+        k: (r.params_before.get(k), v)
+        for k, v in r.params_after.items()
+        if r.params_before.get(k) is None or format_value(r.params_before[k]) != format_value(v)
+    }
+    if changed:
+        table = Table(box=None, pad_edge=False)
+        for column in ("Parameter", "Before", "After"):
+            table.add_column(column)
+        for name, (before, after) in changed.items():
+            table.add_row(
+                name, format_value(before) if before is not None else "?", format_value(after)
+            )
+        out.print(table)
+    for warning in r.warnings:
+        out.print(Text(f"! {warning}", style="bold yellow"))
+
+
+def _calibration_exit(st: CalibrationStatus) -> ExitCode:
+    return exit_code_for(st.result.status) if st.result else ExitCode.TIMEOUT
+
+
+def _progress_line(st: CalibrationStatus) -> str:
+    line = st.instruction or st.state.value
+    if st.compasses:
+        line += "  " + "  ".join(
+            f"compass {c.compass_id}: "
+            f"{c.completion_pct if c.completion_pct is not None else '?'}% {c.status}"
+            for c in st.compasses
+        )
+    return line
+
+
+def _run_calibration(
+    vehicle: mavforge.Vehicle, kind: CalibrationKind, yes: bool
+) -> CalibrationStatus:
+    proc = next(p for p in vehicle.calibration.procedures() if p.kind is kind)
+    render_procedure(proc, err)
+    if not proc.supported:
+        raise NotApprovedError(f"{proc.title} is not available: {proc.reason}")
+    request = vehicle.calibration.request(kind)
+    if not yes:
+        real = "REAL " if vehicle.identity.simulated is not True else ""
+        try:
+            ok = typer.confirm(
+                f"Start {kind.value} calibration on the {real}vehicle?", default=False, err=True
+            )
+        except typer.Abort:
+            ok = False
+        if not ok:
+            raise NotApprovedError("Calibration not started")
+    mavforge.approve_plan(request, approved_by="cli-yes-flag" if yes else "cli-prompt")
+    st = vehicle.calibration.start(request)
+    op = st.operation_id
+    last_line = ""
+    try:
+        while not st.state.finished:
+            if (line := _progress_line(st)) != last_line:
+                err.print(Text(line))
+                last_line = line
+            if st.state is CalibrationState.WAITING_FOR_USER and st.awaiting_confirmation:
+                typer.prompt(
+                    "Press Enter when the vehicle is in position (Ctrl-C to cancel)",
+                    default="",
+                    show_default=False,
+                    err=True,
+                )
+                st = vehicle.calibration.confirm(op, st.awaiting_confirmation)
+                continue
+            time.sleep(0.25)
+            st = vehicle.calibration.status(op)
+    except (KeyboardInterrupt, typer.Abort):
+        err.print(Text("Cancelling...", style="yellow"))
+        vehicle.calibration.cancel(op)
+    return vehicle.calibration.wait(op, 30)
+
+
+def _calibrate_command(kind: CalibrationKind) -> Callable[..., None]:
+    def command(
+        ctx: typer.Context,
+        yes: Annotated[bool, typer.Option("--yes", "-y", help="Start without asking.")] = False,
+    ) -> None:
+        _with_vehicle(
+            ctx,
+            lambda v: _run_calibration(v, kind, yes),
+            render_calibration,
+            _calibration_exit,
+            policy=_CALIBRATE_POLICY,
+        )
+
+    proc = next(p for p in calibration_procedures() if p.kind is kind)
+    command.__doc__ = f"{proc.title}: {proc.summary}"
+    return command
+
+
+for _kind in CalibrationKind:
+    calibrate_app.command(_kind.value)(_calibrate_command(_kind))
+
+
+@calibrate_app.command("list")
+def calibrate_list(ctx: typer.Context) -> None:
+    """Describe every calibration: preconditions, steps, effects (no vehicle needed)."""
+    _offline(
+        ctx,
+        lambda: CalibrationProcedureList(procedures=calibration_procedures()),
+        lambda r: render_procedures(r.procedures),
+    )
 
 
 _WRITE_POLICY = Policy.configure(allow_real_vehicle=True)

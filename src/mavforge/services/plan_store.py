@@ -26,6 +26,7 @@ from mavforge.domain.errors import InvalidInputError
 from mavforge.domain.models import (
     ApplyResult,
     Approval,
+    CalibrationRequest,
     ChangePlan,
     PlanInfo,
     PlanListResult,
@@ -34,6 +35,9 @@ from mavforge.domain.outcomes import OperationStatus
 from mavforge.policy.audit import default_state_dir
 
 APPROVAL_TTL = timedelta(minutes=10)
+
+Approvable = ChangePlan | CalibrationRequest
+"""Anything a human approves before MAVForge acts on it."""
 _PLAN_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 
 
@@ -41,7 +45,7 @@ def plans_dir() -> Path:
     return default_state_dir() / "plans"
 
 
-def compute_digest(plan: ChangePlan) -> str:
+def compute_digest(plan: Approvable) -> str:
     content = plan.model_dump(mode="json", exclude={"plan_id", "digest"})
     canonical = json.dumps(content, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
@@ -60,21 +64,24 @@ def _path(plan_id: str, suffix: str = "") -> Path:
     return plans_dir() / f"{plan_id}{suffix}.json"
 
 
-def save_plan(plan: ChangePlan) -> Path:
+def save_plan(plan: Approvable) -> Path:
     path = _path(plan.plan_id)
     _write_new(path, plan.model_dump_json(indent=2) + "\n")
     return path
 
 
-def load_plan(reference: str | Path) -> ChangePlan:
-    """Load by plan id (from the store) or by path; verify the content digest."""
+def load_approvable(reference: str | Path) -> Approvable:
+    """Load a change plan or calibration request by id or path; verify its digest."""
     text_ref = str(reference)
     path = Path(reference) if not _PLAN_ID_RE.match(text_ref) else _path(text_ref)
     try:
-        plan = ChangePlan.model_validate_json(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        kind = json.loads(text).get("format")
+        model = CalibrationRequest if kind == "mavforge.calibration-request" else ChangePlan
+        plan: Approvable = model.model_validate_json(text)
     except FileNotFoundError:
         raise InvalidInputError(f"No such plan: {reference}") from None
-    except (OSError, ValidationError) as exc:
+    except (OSError, ValueError, AttributeError) as exc:
         raise InvalidInputError(f"{path} is not a valid MAVForge plan") from exc
     if compute_digest(plan) != plan.digest or plan.digest[:12] != plan.plan_id:
         raise InvalidInputError(f"Plan {plan.plan_id} has been modified since it was created")
@@ -84,7 +91,21 @@ def load_plan(reference: str | Path) -> ChangePlan:
     return plan
 
 
-def approve(plan: ChangePlan, approved_by: str, ttl: timedelta = APPROVAL_TTL) -> Approval:
+def load_plan(reference: str | Path) -> ChangePlan:
+    plan = load_approvable(reference)
+    if not isinstance(plan, ChangePlan):
+        raise InvalidInputError(f"{reference} is a calibration request, not a change plan")
+    return plan
+
+
+def load_request(reference: str | Path) -> CalibrationRequest:
+    request = load_approvable(reference)
+    if not isinstance(request, CalibrationRequest):
+        raise InvalidInputError(f"{reference} is a change plan, not a calibration request")
+    return request
+
+
+def approve(plan: Approvable, approved_by: str, ttl: timedelta = APPROVAL_TTL) -> Approval:
     if plan.blocked:
         raise InvalidInputError(f"Plan {plan.plan_id} has blocking issues and cannot be approved")
     if is_applied(plan.plan_id):
@@ -107,7 +128,7 @@ def approve(plan: ChangePlan, approved_by: str, ttl: timedelta = APPROVAL_TTL) -
     return approval
 
 
-def valid_approval(plan: ChangePlan) -> Approval | None:
+def valid_approval(plan: Approvable) -> Approval | None:
     path = _path(plan.plan_id, ".approval")
     try:
         approval = Approval.model_validate_json(path.read_text(encoding="utf-8"))
@@ -142,8 +163,10 @@ def list_plans() -> PlanListResult:
         if not _PLAN_ID_RE.match(path.stem):
             continue
         try:
-            plan = load_plan(path.stem)
+            plan = load_approvable(path.stem)
         except InvalidInputError:
+            continue
+        if not isinstance(plan, ChangePlan):
             continue
         v = plan.vehicle
         infos.append(
