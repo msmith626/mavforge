@@ -80,6 +80,7 @@ def default_copter_params() -> dict[str, ParamSpec]:
         "INS_GYROFFS_Z": (0.0002, ParamType.REAL32),
         "AHRS_TRIM_X": (0.0, ParamType.REAL32),
         "AHRS_TRIM_Y": (0.0, ParamType.REAL32),
+        "AHRS_ORIENTATION": (0, ParamType.INT8),
     }
 
 
@@ -146,6 +147,10 @@ class FakeVehicleConfig:
         default_factory=lambda: [1500, 1500, 1100, 1500, 1100, 1100, 1500, 1500]
     )
     """PWM per RC input channel reported in RC_CHANNELS; empty models no receiver."""
+    accel_mg: tuple[float, float, float] = (0.0, 0.0, -1000.0)
+    """Accelerometer reading (milli-g, body frame as configured) reported in SCALED_IMU."""
+    accel_jitter_mg: float = 0.0
+    """Added to X with alternating sign on each SCALED_IMU (models a shaking vehicle)."""
     other_autopilot_sysids: list[int] = field(default_factory=list[int])
     gcs_heartbeat_sysids: list[int] = field(default_factory=list[int])
 
@@ -167,6 +172,7 @@ class FakeVehicle:
         self._server.settimeout(0.1)
         self.port: int = self._server.getsockname()[1]
         self._started = time.monotonic()
+        self._imu_count = 0
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._received: list[Message] = []
@@ -301,6 +307,10 @@ class FakeVehicle:
         """Set the RC input PWM of channels 1.. (models the person moving the sticks)."""
         self.config.rc_inputs = list(values) + self.config.rc_inputs[len(values) :]
 
+    def set_accel(self, x: float, y: float, z: float) -> None:
+        """Set the accelerometer reading (models the person tilting the vehicle)."""
+        self.config.accel_mg = (x, y, z)
+
     def remove_param(self, name: str) -> None:
         """Remove a parameter, as if a firmware change dropped it. Thread-safe."""
         with self._lock:
@@ -381,6 +391,14 @@ class FakeVehicle:
                     time_boot_ms=boot_ms & 0xFFFFFFFF, chancount=len(values), rssi=255, **chans
                 )
             )
+        elif msg_id == mavlink.MAVLINK_MSG_ID_SCALED_IMU:
+            self._imu_count += 1
+            jitter = cfg.accel_jitter_mg * (1 if self._imu_count % 2 else -1)
+            x, y, z = cfg.accel_mg
+            boot_ms = int((cfg.uptime_s + time.monotonic() - self._started) * 1000)
+            mav.scaled_imu_send(
+                boot_ms & 0xFFFFFFFF, round(x + jitter), round(y), round(z), 0, 0, 0, 0, 0, 0
+            )
         elif msg_id == mavlink.MAVLINK_MSG_ID_SIMSTATE and cfg.simulated:
             mav.simstate_send(0, 0, 0, 0, 0, 0, 0, 0, 0, -353632620, 1491652370)
         else:
@@ -430,6 +448,7 @@ class FakeVehicle:
                 mavlink.MAVLINK_MSG_ID_SYS_STATUS,
                 mavlink.MAVLINK_MSG_ID_GPS_RAW_INT,
                 mavlink.MAVLINK_MSG_ID_RC_CHANNELS,
+                mavlink.MAVLINK_MSG_ID_SCALED_IMU,
             ) or (msg_id == mavlink.MAVLINK_MSG_ID_SIMSTATE and self.config.simulated)
             self.ack(
                 mav, msg, cmd, mavlink.MAV_RESULT_ACCEPTED if known else mavlink.MAV_RESULT_FAILED

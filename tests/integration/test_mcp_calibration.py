@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 import anyio
+import pytest
 from mcp import Client
 from mcp_types import ElicitResult
 
@@ -87,13 +88,14 @@ def test_accel_is_refused_over_mcp(fake: FakeVehicle) -> None:
     assert "mavforge calibrate accel" in result.content[0].text
 
 
-def test_radio_is_refused_over_mcp(fake: FakeVehicle) -> None:
+@pytest.mark.parametrize("kind", ["radio", "orientation"])
+def test_person_guided_checks_are_refused_over_mcp(fake: FakeVehicle, kind: str) -> None:
     async def steps(client: Client) -> Any:
-        return await client.call_tool("calibration_request", {"kind": "radio"})
+        return await client.call_tool("calibration_request", {"kind": kind})
 
     result = run(fake, CAL, steps, accept)
     assert result.is_error
-    assert "mavforge calibrate radio" in result.content[0].text
+    assert f"mavforge calibrate {kind}" in result.content[0].text
 
 
 def test_accel_request_made_elsewhere_is_still_refused_over_mcp(fake: FakeVehicle) -> None:

@@ -99,6 +99,14 @@ CALIBRATE_RADIO = OperationSpec(
     False,
 )
 
+CALIBRATE_ORIENTATION = OperationSpec(
+    "calibrate_orientation",
+    "Guided three-pose board orientation check that proposes AHRS_ORIENTATION as a change "
+    "plan (writes nothing itself; the plan is applied through params_apply after approval).",
+    Permission.READ,
+    False,
+)
+
 _PLANNED: list[OperationSpec] = []
 
 CATALOG: list[OperationSpec] = [
@@ -113,6 +121,7 @@ CATALOG: list[OperationSpec] = [
     PARAMS_APPLY,
     CALIBRATE,
     CALIBRATE_RADIO,
+    CALIBRATE_ORIENTATION,
     *_PLANNED,
 ]
 

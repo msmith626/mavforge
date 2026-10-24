@@ -777,7 +777,8 @@ def render_calibration(st: CalibrationStatus, console: Console = out) -> None:
         console.print(Text(f"Calibration {st.operation_id} is {st.state.value}."))
         return
     style = "green" if r.status is OperationStatus.SUCCEEDED else "bold red"
-    console.print(Text(f"{st.kind.value} calibration: {r.status.value}", style=style))
+    noun = "check" if st.kind is CalibrationKind.ORIENTATION else "calibration"
+    console.print(Text(f"{st.kind.value} {noun}: {r.status.value}", style=style))
     console.print(Text(r.summary))
     for item in r.evidence:
         console.print(Text(f"  evidence: {item}", style="dim"))
@@ -805,6 +806,13 @@ def _calibration_exit(st: CalibrationStatus) -> ExitCode:
 
 def _progress_line(st: CalibrationStatus) -> tuple[object, str]:
     """(change key, text): the key moves only on a status change or a 10% step."""
+    if st.tilt is not None:
+        t = st.tilt
+        pitch = f"nose {'up' if t.pitch_deg >= 0 else 'down'} {abs(t.pitch_deg):.0f}°"
+        roll = f"{'right' if t.roll_deg >= 0 else 'left'} side down {abs(t.roll_deg):.0f}°"
+        return (round(t.pitch_deg / 5), round(t.roll_deg / 5)), (
+            f"the autopilot sees: {pitch}, {roll}"
+        )
     if st.rc_channels:
         moved = [f"RC{c.channel}" for c in st.rc_channels if c.moved]
         waiting = [f"RC{c.channel}" for c in st.rc_channels if not c.moved]
@@ -914,12 +922,16 @@ def _calibrate_command(kind: CalibrationKind) -> Callable[..., None]:
     return command
 
 
+_PLAN_PROPOSING = {
+    p.kind for p in calibration_procedures() if p.proposes_plan
+}  # radio, orientation: own commands below
+
 for _kind in CalibrationKind:
-    if _kind is not CalibrationKind.RADIO:
+    if _kind not in _PLAN_PROPOSING:
         calibrate_app.command(_kind.value)(_calibrate_command(_kind))
 
 
-def render_radio(r: CalibrationStatus | ApplyResult) -> None:
+def render_proposal(r: CalibrationStatus | ApplyResult) -> None:
     if isinstance(r, ApplyResult):
         render_apply(r)
         return
@@ -929,54 +941,77 @@ def render_radio(r: CalibrationStatus | ApplyResult) -> None:
         render_plan_saved(plan)
 
 
-def _radio_exit(r: CalibrationStatus | ApplyResult) -> ExitCode:
+def _proposal_exit(r: CalibrationStatus | ApplyResult) -> ExitCode:
     return _status_exit_code(r) if isinstance(r, ApplyResult) else _calibration_exit(r)
 
 
-@calibrate_app.command("radio")
-def calibrate_radio(
-    ctx: typer.Context,
-    yes: Annotated[
-        bool, typer.Option("--yes", "-y", help="Apply the captured values without asking.")
-    ] = False,
-    plan_only: Annotated[
-        bool, typer.Option(help="Save the change plan for later review; write nothing.")
-    ] = False,
-    offline: Annotated[bool, typer.Option(help="Do not download parameter metadata.")] = False,
-) -> None:
-    """Radio (RC) calibration: sweep the sticks, review the RCn_MIN/MAX/TRIM plan, apply it."""
+def _proposing_command(
+    kind: CalibrationKind,
+    start: Callable[[mavforge.Vehicle, bool], CalibrationStatus],
+    prompt: str,
+    doc: str,
+) -> Callable[..., None]:
+    """A guided check that writes nothing itself, then offers to apply its change plan."""
 
-    def act(vehicle: mavforge.Vehicle) -> CalibrationStatus | ApplyResult:
-        proc = next(p for p in vehicle.calibration.procedures() if p.kind is CalibrationKind.RADIO)
-        render_procedure(proc, err)
-        if not proc.supported:
-            raise NotApprovedError(f"{proc.title} is not available: {proc.reason}")
-        st = _follow(
-            vehicle,
-            vehicle.calibration.start_radio(offline=offline),
-            "Press Enter when done (Ctrl-C to cancel)",
-        )
-        result = st.result
-        plan = result.plan if result else None
-        if (
-            plan_only
-            or result is None
-            or result.status is not OperationStatus.SUCCEEDED
-            or plan is None
-            or all(c.no_change for c in plan.changes)
-        ):
-            return st
-        render_calibration(st, err)
-        try:
-            _confirm_and_approve(plan, yes)
-        except NotApprovedError as exc:
-            raise NotApprovedError(
-                f"{exc.message}. The plan is saved: `mavforge -c <connection> params apply "
-                f"{plan.plan_id}` applies it later."
-            ) from exc
-        return vehicle.params.apply(plan)
+    def command(
+        ctx: typer.Context,
+        yes: Annotated[
+            bool, typer.Option("--yes", "-y", help="Apply the proposed values without asking.")
+        ] = False,
+        plan_only: Annotated[
+            bool, typer.Option(help="Save the change plan for later review; write nothing.")
+        ] = False,
+        offline: Annotated[bool, typer.Option(help="Do not download parameter metadata.")] = False,
+    ) -> None:
+        def act(vehicle: mavforge.Vehicle) -> CalibrationStatus | ApplyResult:
+            proc = next(p for p in vehicle.calibration.procedures() if p.kind is kind)
+            render_procedure(proc, err)
+            if not proc.supported:
+                raise NotApprovedError(f"{proc.title} is not available: {proc.reason}")
+            st = _follow(vehicle, start(vehicle, offline), prompt)
+            result = st.result
+            plan = result.plan if result else None
+            if (
+                plan_only
+                or result is None
+                or result.status is not OperationStatus.SUCCEEDED
+                or plan is None
+                or all(c.no_change for c in plan.changes)
+            ):
+                return st
+            render_calibration(st, err)
+            try:
+                _confirm_and_approve(plan, yes)
+            except NotApprovedError as exc:
+                raise NotApprovedError(
+                    f"{exc.message}. The plan is saved: `mavforge -c <connection> params apply "
+                    f"{plan.plan_id}` applies it later."
+                ) from exc
+            return vehicle.params.apply(plan)
 
-    _with_vehicle(ctx, act, render_radio, _radio_exit, policy=_WRITE_POLICY)
+        _with_vehicle(ctx, act, render_proposal, _proposal_exit, policy=_WRITE_POLICY)
+
+    command.__doc__ = doc
+    return command
+
+
+calibrate_app.command("radio")(
+    _proposing_command(
+        CalibrationKind.RADIO,
+        lambda v, offline: v.calibration.start_radio(offline=offline),
+        "Press Enter when done (Ctrl-C to cancel)",
+        "Radio (RC) calibration: sweep the sticks, review the RCn_MIN/MAX/TRIM plan, apply it.",
+    )
+)
+calibrate_app.command("orientation")(
+    _proposing_command(
+        CalibrationKind.ORIENTATION,
+        lambda v, offline: v.calibration.start_orientation(offline=offline),
+        "Press Enter when the vehicle is in position (Ctrl-C to cancel)",
+        "Board orientation check: tilt the vehicle three ways, review the AHRS_ORIENTATION "
+        "plan, apply it.",
+    )
+)
 
 
 @calibrate_app.command("list")

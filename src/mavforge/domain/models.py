@@ -496,6 +496,7 @@ class CalibrationKind(StrEnum):
     COMPASS = "compass"
     ACCEL = "accel"
     RADIO = "radio"
+    ORIENTATION = "orientation"
 
 
 class CalibrationState(StrEnum):
@@ -558,6 +559,14 @@ class RcChannelRange(_Model):
     moved: bool = Field(description="Travelled far enough to count as swept.")
 
 
+class Tilt(_Model):
+    """Vehicle tilt from the accelerometer, in the body frame the autopilot currently
+    uses (so a wrong AHRS_ORIENTATION shows up as the wrong axis moving)."""
+
+    roll_deg: float = Field(description="Positive: right side down.")
+    pitch_deg: float = Field(description="Positive: nose up.")
+
+
 class CalibrationResult(_Model):
     status: OperationStatus
     summary: str
@@ -570,7 +579,8 @@ class CalibrationResult(_Model):
     warnings: list[str] = Field(default_factory=list)
     plan: ChangePlan | None = Field(
         default=None,
-        description="Proposed parameter changes (radio calibration). Nothing has been "
+        description="Proposed parameter changes (radio calibration, orientation check). "
+        "Nothing has been "
         "written: a human must approve the plan before it is applied.",
     )
 
@@ -592,6 +602,9 @@ class CalibrationStatus(_Model):
     progress_pct: int | None = None
     compasses: list[CompassCalProgress] = Field(default_factory=list)
     rc_channels: list[RcChannelRange] = Field(default_factory=list)
+    tilt: Tilt | None = Field(
+        default=None, description="Live tilt as the autopilot sees it (orientation check)."
+    )
     vehicle_messages: list[StatusText] = Field(
         default_factory=list, description="STATUSTEXT received during the calibration."
     )

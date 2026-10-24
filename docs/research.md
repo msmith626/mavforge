@@ -253,3 +253,46 @@ These were checked against ArduCopter 4.7.2 SITL. The source was read at tag `Pl
   - The pre-arm reasons were start-up states: `EKF3 not started`, `waiting for home`, `Baro`/`Compass not healthy`, `INITIALISING mode not armable`.
   - About a minute later, the same check showed only bench conditions (GPS bad fix, radio failsafe → RTL) and `EKF3 Yaw inconsistent 119 deg. Wait`.
   - `diagnose` now warns "Vehicle is still starting up" whenever the heartbeat says so, even when uptime is not available.
+
+## Board orientation (`AHRS_ORIENTATION`)
+
+All of this is from ArduPilot source at tag `Plane-4.6.2`, unless marked otherwise.
+
+- **Where the rotation is applied.** `AP_InertialSensor_Backend::_rotate_and_correct_accel()`:
+  1. rotates by the per-sensor orientation;
+  2. applies offsets and scale, in the sensor frame;
+  3. rotates by `_board_orientation` ("rotate to body frame").
+
+  The gyro path is the same. So the accelerometer calibration stays valid when
+  `AHRS_ORIENTATION` changes, and the level trim (`AHRS_TRIM_*`, measured on body axes)
+  doesn't.
+- **What `SCALED_IMU` reports.** `GCS_MAVLINK::send_scaled_imu()` sends
+  `ins.get_accel(instance)`, the corrected body-frame vector, in milli-g. `RAW_IMU` uses
+  the same values. `MAV_CMD_REQUEST_MESSAGE` maps 26 to `MSG_SCALED_IMU`. [verified in
+  SITL]
+- **Rotation semantics.** `Vector3::rotate()` in `AP_Math/vector3.cpp` maps board
+  vectors to body vectors. Each standard rotation equals `Rz(yaw) @ Ry(pitch) @ Rx(roll)`
+  with the angles in its enum name, e.g. `ROTATION_YAW_90` is `(x, y, z) -> (-y, x, z)`.
+  So with Yaw90, the board's X axis (its arrow) points to the vehicle's right.
+  `tests/unit/test_orientation_math.py` checks MAVForge's matrices against the
+  transcribed `rotate()` cases. [verified]
+- **Labels.** The parameter metadata's labels list rotations in the opposite order to
+  the enum names ("Yaw90Roll180" for `ROTATION_ROLL_180_YAW_90`), and its description
+  says the label gives "the order of rotations". The matrices are identical. MAVForge
+  displays the metadata labels.
+  - Value 38's label reads "Yaw293Pitch68Roll180", but the code comment and matrix say
+    roll 90. MAVForge uses the matrix and never proposes 38.
+  - Value 41 (Pitch7) isn't listed in Plane's metadata.
+- **When it takes effect.** The parameter description says "This option takes affect
+  on next boot. After changing you will need to re-level your vehicle." ArduCopter
+  4.7.2 SITL applied a change without a reboot. MAVForge still tells the person to
+  reboot, as documented. [verified in SITL]
+- **SITL.** `AP_InertialSensor_SITL` rotates the simulated samples by `SIM_IMU_ORIENT`
+  before ArduPilot applies `AHRS_ORIENTATION`. The correct setting is therefore the
+  inverse: `SIM_IMU_ORIENT=2` (Yaw90) needs `AHRS_ORIENTATION=6` (Yaw270).
+  - The SITL test checks this, applies 6, and re-runs the check, which then reports a
+    match. [verified]
+- **Ground truth on hardware.** On the ArduPlane 4.6.2 bench board, `AHRS_ORIENTATION=0`
+  was confirmed by hand on 2026-10-23: the arrow points at the nose, and nose up and
+  right wing down read correctly in `ATTITUDE`. The check itself hasn't been run on
+  hardware yet.

@@ -51,6 +51,7 @@ from mavforge.services import params as params_service
 from mavforge.services import plan_store
 from mavforge.services import status as status_service
 from mavforge.services.calibration import operations as calibration_ops
+from mavforge.services.calibration.orientation import OrientationWorkflow
 from mavforge.services.calibration.radio import RadioWorkflow
 from mavforge.services.diagnostics import DEFAULT_PREARM_WAIT
 from mavforge.services.session import (
@@ -125,7 +126,8 @@ class Params:
 
 class Calibration:
     """Calibration workflows. Each run that changes the vehicle needs an approved request
-    (see :func:`approve_plan`); radio calibration instead proposes an approvable plan."""
+    (see :func:`approve_plan`); the radio calibration and the orientation check instead
+    propose an approvable plan."""
 
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -150,6 +152,18 @@ class Calibration:
         """
         return calibration_ops.REGISTRY.start_observation(
             self._session, CalibrationKind.RADIO, workflow=RadioWorkflow(offline=offline)
+        )
+
+    def start_orientation(self, *, offline: bool = False) -> CalibrationStatus:
+        """Start a board orientation check (three poses) in the background.
+
+        Like :meth:`start_radio`, it writes nothing; ``result.plan`` proposes
+        AHRS_ORIENTATION, or keeps the current value if it already matches.
+        """
+        return calibration_ops.REGISTRY.start_observation(
+            self._session,
+            CalibrationKind.ORIENTATION,
+            workflow=OrientationWorkflow(offline=offline),
         )
 
     def status(self, operation_id: str) -> CalibrationStatus:

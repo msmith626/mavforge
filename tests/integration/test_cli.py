@@ -262,7 +262,7 @@ def test_calibrate_list_needs_no_vehicle() -> None:
     code, stdout, _ = invoke("--json", "calibrate", "list")
     assert code == ExitCode.OK
     kinds = [p["kind"] for p in json.loads(stdout)["procedures"]]
-    assert kinds == ["gyro", "level", "compass", "accel", "radio"]
+    assert kinds == ["gyro", "level", "compass", "accel", "radio", "orientation"]
 
 
 class _GatedInput(io.BytesIO):
@@ -359,3 +359,47 @@ def test_calibrate_radio_plan_only_json_writes_nothing(
     assert data["result"]["status"] == "succeeded"
     assert len(data["result"]["plan"]["changes"]) == 12
     assert not any(isinstance(m, mavlink.MAVLink_param_set_message) for m in fake.received)
+
+
+class _PosingInput(io.BytesIO):
+    """stdin for the orientation check: before each Enter, put the fake in the next pose."""
+
+    def __init__(self, fake: FakeVehicle, readings: list[tuple[float, float, float]]) -> None:
+        super().__init__(b"\n" * len(readings) + b"y\n")
+        self.fake = fake
+        self.readings = readings
+
+    def read(self, size: int | None = -1) -> bytes:
+        if size == 0:
+            return b""
+        if self.readings:
+            self.fake.set_accel(*self.readings.pop(0))
+            time.sleep(0.3)
+        return super().readline()
+
+    read1 = read  # type: ignore[assignment]
+
+
+def test_calibrate_orientation_cli_proposes_then_applies(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeVehicle
+) -> None:
+    s, c = 574.0, 819.0  # 35 degrees
+    # board arrow toward the right wing, AHRS_ORIENTATION 0: reading = (a_y, -a_x, a_z)
+    stdin = _PosingInput(fake, [(0, 0, -1000), (0, -s, -c), (-s, 0, -c)])
+
+    def input_stream(_input: object, _charset: str) -> _PosingInput:
+        return stdin
+
+    monkeypatch.setattr(typer.testing, "make_input_stream", input_stream)
+    result = runner.invoke(
+        app,
+        ["-c", fake.connection_string, "calibrate", "orientation", "--offline"],
+        env={"MAVFORGE_CONNECTION": None},
+    )
+    assert result.exit_code == ExitCode.OK, result.output
+    # nose up on this board looks like the right side going down
+    assert "the autopilot sees: nose up 0°, right side down 35°" in result.stderr
+    assert "orientation check: succeeded" in result.stderr
+    assert "AHRS_ORIENTATION 2 (Yaw90), not 0 (None)" in result.stderr
+    assert "Write 1 parameter(s)" in result.stderr
+    assert fake.config.params["AHRS_ORIENTATION"][0] == 2

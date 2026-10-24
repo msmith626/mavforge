@@ -61,6 +61,7 @@ needs a reboot, the result says so.
 | Compass (onboard) | yes, if `COMPASS_CALIBRATION` capability | success (1 and 3 compasses), per-compass failure, accept-without-save, cancel, timeout | **passed** (3 compasses, `calibration` model) | **passed**: ArduPlane 4.6.2, 1 compass, USB power only (2026-10-23) | yes |
 | Accelerometer, 6 positions | yes | success, failure, silence, cancel | **passed** (`calibration` model) | not yet | **no** |
 | Radio (RC) | yes (GCS-side sweep, proposes a change plan) | success, apply after approval, unmoved/uncentred/throttle-high, reversed throttle, RCMAP, jitter, no receiver, receiver in failsafe, cancel, armed | **passed** (`RC_CHANNELS_OVERRIDE` from the test) | **passed** on ArduPlane 4.6.2 (Spektrum DX7s, 7 channels; result matched the existing calibration to within 2 us) | **no** |
+| Board orientation check | yes (three poses, proposes `AHRS_ORIENTATION` as a change plan) | correct, arrow right, upside down, wrong current setting, live tilt, too little tilt, shaking, wrong side, not square, custom rotation, no IMU data, cancel, permissions | **passed** (`SIM_IMU_ORIENT=2`: proposed 6, applied, re-check matched) | not yet | **no** |
 
 Other autopilots use the generic adapter, which declares no calibrations.
 
@@ -206,6 +207,69 @@ vehicle only when a human approves the plan and it is applied with a read-back.
   confirming.
 
 **Cancel:** at any time. Nothing has been written.
+
+## Board orientation check
+
+`AHRS_ORIENTATION` tells ArduPilot how the flight controller is mounted. ArduPilot
+rotates every accelerometer, gyro and internal-compass sample from the board's axes to
+the vehicle's by it. If it is wrong, the autopilot sees a nose-up tilt as a roll, or
+upside down. The level calibration can't detect a wrong yaw rotation, because turning a
+flat board doesn't change which way is down. Like the radio calibration, the check
+**writes nothing**: it proposes `AHRS_ORIENTATION` as a change plan.
+
+**Needs:** the vehicle disarmed, motors unpowered or propellers removed.
+
+**Sequence:**
+1. MAVForge reads `AHRS_ORIENTATION`. Custom rotations (100 and up) aren't checked.
+2. It requests `SCALED_IMU` (26) with `MAV_CMD_REQUEST_MESSAGE` every 0.1 s.
+   ArduPilot reports the accelerometer there after applying `AHRS_ORIENTATION`. It
+   shows the tilt the autopilot currently sees, live: "the autopilot sees: nose up 32°,
+   right side down 2°".
+3. **Three poses**, each confirmed by the person:
+   - **level**, in the normal flying attitude;
+   - **nose up** 30–45°;
+   - **right side down** 30–45°.
+
+   Each pose averages 10 readings (about 1 s), and must meet three conditions:
+   - **still:** no reading more than 80 mG from the mean;
+   - **about 1 g;**
+   - **tilted** at least 20° from level (nose up and right side down only).
+
+   A pose that fails a condition is asked for again, up to three times, with the reason
+   shown.
+4. **Solve.** Gravity in the three poses gives the vehicle's down, forward and right
+   axes in the frame ArduPilot currently uses. Combined with the current setting, that
+   gives the board's true mounting.
+   - The two tilts must agree on the right axis within 30°. This catches raising the
+     tail or lowering the left side.
+   - The mounting is matched against ArduPilot's rotations 0–43. Rotations 38 and 41
+     exist for particular boards and are not proposed: a small tilt belongs in the level
+     trim.
+   - The nearest rotation must be within 20° of the measured mounting.
+   - When two values describe the same rotation, the current value is kept.
+5. **Plan.** Either `AHRS_ORIENTATION` stays as it is ("matches how the board is
+   mounted"), or the plan proposes the new value. The evidence says where the board's
+   arrow points and which way its top faces.
+
+**After changing it:** reboot, then repeat the level calibration. Both are from
+ArduPilot's parameter description: "This option takes affect on next boot. After
+changing you will need to re-level your vehicle." MAVForge also recommends repeating the
+compass calibration. The accelerometer calibration stays valid, because ArduPilot
+calibrates in the sensor frame, before the board rotation.
+
+**Interfaces:**
+- **CLI:** `mavforge calibrate orientation` (with `--yes`, `--plan-only`, `--offline`,
+  as for radio).
+- **Python:** `vehicle.calibration.start_orientation()`.
+- **Permissions:** the check needs only read permission. Applying needs `configure`.
+- **Not over MCP:** the person has to tilt the vehicle and confirm each pose.
+
+**Limits:**
+- The check can't tell if *both* tilts were reversed (tail raised *and* left side
+  lowered). That looks like a board turned 180°. The live tilt line shows what the
+  autopilot sees, and the evidence names where the arrow points; compare that with the
+  board.
+- External compasses have their own `COMPASS_ORIENTn` and aren't checked.
 
 ## Recovery
 
