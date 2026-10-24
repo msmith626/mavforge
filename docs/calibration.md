@@ -61,7 +61,7 @@ needs a reboot, the result says so.
 | Compass (onboard) | yes, if `COMPASS_CALIBRATION` capability | success (1 and 3 compasses), per-compass failure, accept-without-save, cancel, timeout | **passed** (3 compasses, `calibration` model) | **passed**: ArduPlane 4.6.2, 1 compass, USB power only (2026-10-23) | yes |
 | Accelerometer, 6 positions | yes | success, failure, silence, cancel | **passed** (`calibration` model) | not yet | **no** |
 | Radio (RC) | yes (GCS-side sweep, proposes a change plan) | success, apply after approval, unmoved/uncentred/throttle-high, reversed throttle, RCMAP, jitter, no receiver, receiver in failsafe, cancel, armed | **passed** (`RC_CHANNELS_OVERRIDE` from the test) | **passed** on ArduPlane 4.6.2 (Spektrum DX7s, 7 channels; result matched the existing calibration to within 2 us) | **no** |
-| Board orientation check | yes (three poses, proposes `AHRS_ORIENTATION` as a change plan) | correct, arrow right, upside down, wrong current setting, live tilt, too little tilt, shaking, wrong side, not square, custom rotation, no IMU data, cancel, permissions | **passed** (`SIM_IMU_ORIENT=2`: proposed 6, applied, re-check matched) | not yet | **no** |
+| Board orientation check | yes (three poses, proposes `AHRS_ORIENTATION` as a change plan) | correct, arrow right, upside down, wrong current setting, live tilt, too little tilt, shaking, wrong side, not square, custom rotation, no IMU data, cancel, permissions | **passed** (`SIM_IMU_ORIENT=2`: proposed 6, applied, re-check matched) | **passed** on ArduPlane 4.6.2, hand-held (0 matches, as confirmed by hand; heading within 5°, first pose 9° off level) | **no** |
 
 Other autopilots use the generic adapter, which declares no calibrations.
 
@@ -224,7 +224,8 @@ flat board doesn't change which way is down. Like the radio calibration, the che
 2. It requests `SCALED_IMU` (26) with `MAV_CMD_REQUEST_MESSAGE` every 0.1 s.
    ArduPilot reports the accelerometer there after applying `AHRS_ORIENTATION`. It
    shows the tilt the autopilot currently sees, live: "the autopilot sees: nose up 32°,
-   right side down 2°".
+   right side down 2°". A new line is printed only once pitch or roll has moved 5° from
+   the last one printed.
 3. **Three poses**, each confirmed by the person:
    - **level**, in the normal flying attitude;
    - **nose up** 30–45°;
@@ -245,7 +246,16 @@ flat board doesn't change which way is down. Like the radio calibration, the che
    - The mounting is matched against ArduPilot's rotations 0–43. Rotations 38 and 41
      exist for particular boards and are not proposed: a small tilt belongs in the level
      trim.
-   - The nearest rotation must be within 20° of the measured mounting.
+   - What doesn't fit the chosen rotation is split in two, and each part is judged on
+     its own:
+     - **Heading.** How far the two tilts put the board's arrow from the rotation's.
+       The tilts measure this well, so it must be within 20°.
+     - **First-pose tilt.** How far the first pose was from level with that rotation.
+       Gravity alone cannot tell a vehicle resting slightly tilted from a board
+       mounted slightly tilted, so this only rejects clear cases (over 15°), with a
+       warning over 10° (the most the level calibration corrects). 15° stays well
+       below 22.5°, where a 45° rotation would explain the reading as well as a
+       square one.
    - When two values describe the same rotation, the current value is kept.
 5. **Plan.** Either `AHRS_ORIENTATION` stays as it is ("matches how the board is
    mounted"), or the plan proposes the new value. The evidence says where the board's

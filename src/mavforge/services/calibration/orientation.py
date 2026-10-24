@@ -20,6 +20,7 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from mavforge.domain.errors import MAVForgeError
 from mavforge.domain.models import (
@@ -53,10 +54,16 @@ MAX_SHAKE_MG = 80.0
 MIN_TILT_DEG = 20.0
 MAX_INCONSISTENCY_DEG = 30.0
 """Nose-up and right-side-down tilts must agree on the right axis within this."""
-MAX_MOUNT_ERROR_DEG = 20.0
-"""The best standard rotation must be within this of the measured mounting."""
-SQUARE_WARNING_DEG = 10.0
-"""Warn above this: ArduPilot's level trim absorbs at most 10 degrees of roll and pitch."""
+MAX_HEADING_ERROR_DEG = 20.0
+"""The arrow direction found from the two tilts must be within this of the proposed
+rotation's. This is what the check measures well."""
+MAX_LEVEL_TILT_DEG = 15.0
+"""With the proposed rotation, the first pose must be within this of level. Gravity alone
+cannot tell a vehicle resting slightly tilted from a board mounted slightly tilted, so this
+only rejects clear cases; it stays well below 22.5 degrees, where a 45-degree rotation
+would explain the reading as well as a square one."""
+LEVEL_TILT_WARNING_DEG = 10.0
+"""Warn above this: ArduPilot's level calibration corrects at most 10 degrees."""
 AXIS_MATCH_DEG = 30.0
 
 # ArduPilot's Rotation enum (AP_Math/rotations.h): value -> (roll, pitch, yaw) degrees.
@@ -93,7 +100,10 @@ PROPOSABLE = frozenset(ROTATIONS) - {38, 41}
 """Rotations the check may propose. 38 and 41 exist for particular boards; a small tilt
 like 41's 7 degrees belongs in the level trim, not the board orientation."""
 
-LEVEL = "Rest the vehicle level, in its normal flying attitude, on a steady surface. Then confirm."
+LEVEL = (
+    "Rest the vehicle level, in its normal flying attitude, on a steady surface (prop up "
+    "the tail of a taildragger). Then confirm."
+)
 NOSE_UP = (
     "Raise the nose about 30 to 45 degrees, keeping the wings (or sides) level; the tail "
     "can stay on the surface. Hold it still, then confirm."
@@ -214,6 +224,41 @@ def solve(level: Vec, nose_up: Vec, right_down: Vec, current: int) -> tuple[Mat,
     return _matmul(to_body, rotation_matrix(current)), inconsistency
 
 
+@dataclass(frozen=True)
+class Assessment:
+    best: int
+    """Closest proposable rotation (or the current value, if equivalent)."""
+    heading_error_deg: float
+    """How far the arrow direction from the two tilts is from the best rotation's."""
+    level_tilt: Tilt
+    """The first pose as the vehicle would read it with the best rotation."""
+    level_tilt_deg: float
+    inconsistency_deg: float
+    """How far the two tilts disagree about the right-hand axis."""
+    arrow: str
+    top: str
+
+
+def assess(level: Vec, nose_up: Vec, right_down: Vec, current: int) -> Assessment:
+    """Pick the rotation, and split what doesn't fit into heading and first-pose tilt."""
+    mounting, inconsistency = solve(level, nose_up, right_down, current)
+    best, _ = best_rotation(mounting, current)
+    # first pose seen through the best rotation: board = current^T @ reading
+    board = _apply(_transpose(rotation_matrix(current)), level)
+    seen = _apply(rotation_matrix(best), board)
+    # forward axis of the best rotation, in the body frame the poses define
+    forward = _apply(_matmul(mounting, _transpose(rotation_matrix(best))), (1, 0, 0))
+    return Assessment(
+        best=best,
+        heading_error_deg=abs(math.degrees(math.atan2(forward[1], forward[0]))),
+        level_tilt=tilt_of(seen),
+        level_tilt_deg=_angle(seen, (0, 0, -1)),
+        inconsistency_deg=inconsistency,
+        arrow=_direction(_apply(mounting, (1, 0, 0))),
+        top=_direction(_apply(mounting, (0, 0, -1))),
+    )
+
+
 def best_rotation(mounting: Mat, current: int) -> tuple[int, float]:
     """Closest proposable rotation (the current value wins a tie, then the lowest)."""
     candidates = PROPOSABLE | {current}
@@ -245,9 +290,10 @@ class OrientationWorkflow(Workflow):
             changes_parameters=["AHRS_ORIENTATION (via an approved change plan)"],
             typical_duration="about 1 minute",
             success_evidence=f"Each pose held still and tilted at least {MIN_TILT_DEG:.0f} "
-            f"degrees; the two tilts agree within {MAX_INCONSISTENCY_DEG:.0f} degrees and the "
-            f"mounting is within {MAX_MOUNT_ERROR_DEG:.0f} degrees of a standard rotation. A "
-            "change is written only through an approved plan with read-back.",
+            f"degrees; the two tilts agree within {MAX_INCONSISTENCY_DEG:.0f} degrees, put the "
+            f"board's arrow within {MAX_HEADING_ERROR_DEG:.0f} degrees of a standard rotation, "
+            f"and the first pose is within {MAX_LEVEL_TILT_DEG:.0f} degrees of level. A change "
+            "is written only through an approved plan with read-back.",
             cancellation="Cancellable at any time; nothing is written by the check itself.",
             available_via_mcp=False,
             proposes_plan=True,
@@ -356,31 +402,41 @@ class OrientationWorkflow(Workflow):
     def _result(
         self, ctx: WorkflowContext, poses: dict[str, Vec], current: int, evidence: list[str]
     ) -> CalibrationResult:
-        mounting, inconsistency = solve(
-            poses["level"], poses["nose_up"], poses["right_down"], current
-        )
-        if inconsistency > MAX_INCONSISTENCY_DEG:
+        a = assess(poses["level"], poses["nose_up"], poses["right_down"], current)
+        best = a.best
+        if a.inconsistency_deg > MAX_INCONSISTENCY_DEG:
             return _failed(
-                f"The nose-up and right-side-down tilts disagree by {inconsistency:.0f} degrees. "
-                "Check you raised the nose (not the tail) and lowered the right side (not the "
-                "left), then run the check again. Nothing was written.",
+                f"The nose-up and right-side-down tilts disagree by {a.inconsistency_deg:.0f} "
+                "degrees. Check you raised the nose (not the tail) and lowered the right side "
+                "(not the left), then run the check again. Nothing was written.",
                 evidence,
             )
-        best, error = best_rotation(mounting, current)
-        arrow = _direction(_apply(mounting, (1, 0, 0)))
-        top = _direction(_apply(mounting, (0, 0, -1)))
-        evidence.append(
-            f"The board's X axis (its arrow) points toward {arrow}; its top faces {top}"
-        )
-        evidence.append(
-            f"Closest standard rotation: {best} ({rotation_name(best)}), {error:.0f} degrees "
-            f"from the measured mounting; tilts agreed within {inconsistency:.0f} degrees"
-        )
-        if error > MAX_MOUNT_ERROR_DEG:
+        tilt = a.level_tilt
+        evidence += [
+            f"The board's X axis (its arrow) points toward {a.arrow}; its top faces {a.top}",
+            f"Closest standard rotation: {best} ({rotation_name(best)}); the tilts put the "
+            f"arrow {a.heading_error_deg:.0f} degrees from it and agreed with each other "
+            f"within {a.inconsistency_deg:.0f} degrees",
+            f"With it, the first pose reads roll {round(tilt.roll_deg):+d}, pitch "
+            f"{round(tilt.pitch_deg):+d} ({a.level_tilt_deg:.0f} degrees from level)",
+        ]
+        if a.heading_error_deg > MAX_HEADING_ERROR_DEG:
             return _failed(
-                f"The board is mounted {error:.0f} degrees from the nearest standard rotation "
-                f"({best}, {rotation_name(best)}). Mount it square to the vehicle, or set a "
-                "custom rotation (not supported by MAVForge). Nothing was written.",
+                f"The tilts put the board's arrow {a.heading_error_deg:.0f} degrees from the "
+                f"nearest standard rotation ({best}, {rotation_name(best)}). Run the check "
+                "again, raising the nose and lowering the right side as squarely as you can. "
+                "If it repeats, the board is turned between standard rotations: mount it "
+                "square, or set a custom rotation (not supported by MAVForge). Nothing was "
+                "written.",
+                evidence,
+            )
+        if a.level_tilt_deg > MAX_LEVEL_TILT_DEG:
+            return _failed(
+                f"The first pose was {a.level_tilt_deg:.0f} degrees from level. Run the check "
+                "again with the vehicle level (prop up the tail of a taildragger). If the "
+                "vehicle really was level, the board is tilted in the airframe by that much: "
+                "mount it level, or set a custom rotation (not supported by MAVForge). "
+                "Nothing was written.",
                 evidence,
             )
         change = rotation_error_deg(rotation_matrix(best), rotation_matrix(current)) > 1
@@ -390,11 +446,12 @@ class OrientationWorkflow(Workflow):
                 "After applying: reboot the autopilot, then repeat the level calibration (its "
                 "trim was measured on the old axes) and the compass calibration."
             )
-        if error > SQUARE_WARNING_DEG:
+        if a.level_tilt_deg > LEVEL_TILT_WARNING_DEG:
             warnings.append(
-                f"The board is {error:.0f} degrees off the standard rotation. Check it is "
-                "square to the airframe and that the level pose was really level; the level "
-                f"calibration can absorb at most {SQUARE_WARNING_DEG:.0f} degrees."
+                f"The first pose was {a.level_tilt_deg:.0f} degrees from level. That doesn't "
+                "change the result, but if the vehicle really was level the board is tilted "
+                f"in the airframe, and the level calibration corrects at most "
+                f"{LEVEL_TILT_WARNING_DEG:.0f} degrees."
             )
         requested = best if change else current
         try:

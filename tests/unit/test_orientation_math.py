@@ -11,6 +11,7 @@ from mavforge.services.calibration.orientation import (
     LABELS,
     ROTATIONS,
     Vec,
+    assess,
     best_rotation,
     rotation_matrix,
     rotation_name,
@@ -145,3 +146,27 @@ def test_a_slight_nose_up_mount_is_not_pitch7() -> None:
     pitched = ((c, 0.0, s), (0.0, 1.0, 0.0), (-s, 0.0, c))
     best, error = best_rotation(pitched, 0)
     assert (best, round(error)) == (0, 6)
+
+
+def test_hand_held_bench_run_on_arduplane() -> None:
+    # Real readings (mG) from the ArduPlane 4.6.2 bench board, AHRS_ORIENTATION 0 confirmed
+    # by hand, held by hand (2026-10-23). The first pose was about 9 degrees off level.
+    a = assess((-148, 74, -996), (680, 82, -664), (-250, -804, -569), current=0)
+    assert a.best == 0
+    assert (a.arrow, a.top) == ("the nose", "up")
+    assert a.heading_error_deg < 6
+    assert (round(a.level_tilt.roll_deg), round(a.level_tilt.pitch_deg)) == (-4, -8)
+
+
+def test_first_pose_tilt_does_not_change_the_heading() -> None:
+    # the vehicle rests 12 degrees nose up (a taildragger on its wheels)
+    s, c = math.sin(math.radians(12)), math.cos(math.radians(12))
+    tail_down = ((c, 0.0, s), (0.0, 1.0, 0.0), (-s, 0.0, c))
+
+    def seen(v: Vec) -> Vec:  # rotate each pose by the resting tilt
+        return tuple(sum(tail_down[r][k] * v[k] for k in range(3)) for r in range(3))  # type: ignore[return-value]
+
+    a = assess(*(seen(p) for p in body_poses()), current=0)
+    assert a.best == 0
+    assert a.heading_error_deg == pytest.approx(0, abs=1e-6)
+    assert a.level_tilt_deg == pytest.approx(12)

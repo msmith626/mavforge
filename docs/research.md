@@ -294,5 +294,13 @@ All of this is from ArduPilot source at tag `Plane-4.6.2`, unless marked otherwi
     match. [verified]
 - **Ground truth on hardware.** On the ArduPlane 4.6.2 bench board, `AHRS_ORIENTATION=0`
   was confirmed by hand on 2026-10-23: the arrow points at the nose, and nose up and
-  right wing down read correctly in `ATTITUDE`. The check itself hasn't been run on
-  hardware yet.
+  right wing down read correctly in `ATTITUDE`.
+- **First hardware run (2026-10-23, hand-held).** Result: 0 matches.
+  - The first pose read 8° nose down and 4° left side down. In the first version, that
+    went straight into a single "10° from the standard rotation" figure, and a warning
+    blamed the board.
+  - Split as the check now does, it was a 4.6° heading error plus a 9.4° first-pose
+    tilt.
+  - The readings are a unit test (`test_hand_held_bench_run_on_arduplane`).
+  - The live tilt line also printed on every crossing of a 5° rounding boundary (dozens
+    of lines while holding still). It now prints on a 5° change from the last line.

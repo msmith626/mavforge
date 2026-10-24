@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any, NoReturn, cast
 
 import typer
 from pydantic import BaseModel
@@ -805,14 +805,13 @@ def _calibration_exit(st: CalibrationStatus) -> ExitCode:
 
 
 def _progress_line(st: CalibrationStatus) -> tuple[object, str]:
-    """(change key, text): the key moves only on a status change or a 10% step."""
+    """(change key, text). Compass keys move on a status change or a 10% step; tilt keys
+    are (pitch, roll), compared with a threshold by :func:`_progress_changed`."""
     if st.tilt is not None:
         t = st.tilt
         pitch = f"nose {'up' if t.pitch_deg >= 0 else 'down'} {abs(t.pitch_deg):.0f}°"
         roll = f"{'right' if t.roll_deg >= 0 else 'left'} side down {abs(t.roll_deg):.0f}°"
-        return (round(t.pitch_deg / 5), round(t.roll_deg / 5)), (
-            f"the autopilot sees: {pitch}, {roll}"
-        )
+        return (t.pitch_deg, t.roll_deg), f"the autopilot sees: {pitch}, {roll}"
     if st.rc_channels:
         moved = [f"RC{c.channel}" for c in st.rc_channels if c.moved]
         waiting = [f"RC{c.channel}" for c in st.rc_channels if not c.moved]
@@ -826,6 +825,20 @@ def _progress_line(st: CalibrationStatus) -> tuple[object, str]:
         for c in st.compasses
     )
     return key, text
+
+
+TILT_STEP_DEG = 5.0
+"""A new tilt line is printed once pitch or roll has moved this far from the last one."""
+
+
+def _progress_changed(st: CalibrationStatus, key: object, last: object) -> bool:
+    if st.tilt is not None and isinstance(last, tuple):
+        pitch, roll = cast(tuple[float, float], last)
+        return (
+            abs(st.tilt.pitch_deg - pitch) >= TILT_STEP_DEG
+            or abs(st.tilt.roll_deg - roll) >= TILT_STEP_DEG
+        )
+    return key != last
 
 
 def _run_calibration(
@@ -863,7 +876,7 @@ def _follow(vehicle: mavforge.Vehicle, st: CalibrationStatus, prompt: str) -> Ca
     def show_progress(current: CalibrationStatus) -> None:
         nonlocal last_progress
         key, progress = _progress_line(current)
-        if progress and key != last_progress:
+        if progress and _progress_changed(current, key, last_progress):
             err.print(Text(f"  {progress}"))
             last_progress = key
 

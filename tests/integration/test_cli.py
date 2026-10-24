@@ -4,6 +4,7 @@ import io
 import json
 import threading
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -403,3 +404,33 @@ def test_calibrate_orientation_cli_proposes_then_applies(
     assert "AHRS_ORIENTATION 2 (Yaw90), not 0 (None)" in result.stderr
     assert "Write 1 parameter(s)" in result.stderr
     assert fake.config.params["AHRS_ORIENTATION"][0] == 2
+
+
+def test_live_tilt_prints_only_on_a_real_change() -> None:
+    from mavforge.cli.app import _progress_changed, _progress_line  # pyright: ignore[reportPrivateUsage]
+    from mavforge.domain.models import (
+        CalibrationKind,
+        CalibrationState,
+        CalibrationStatus,
+        Tilt,
+        VehicleIdentity,
+    )
+
+    def status(pitch: float, roll: float) -> CalibrationStatus:
+        now = datetime.now(UTC)
+        return CalibrationStatus(
+            operation_id="x",
+            kind=CalibrationKind.ORIENTATION,
+            vehicle=VehicleIdentity.model_construct(),
+            state=CalibrationState.WAITING_FOR_USER,
+            started_at=now,
+            updated_at=now,
+            tilt=Tilt(pitch_deg=pitch, roll_deg=roll),
+        )
+
+    last, _ = _progress_line(status(7.4, 5.0))
+    for pitch, roll in ((7.6, 5.2), (8.1, 4.4), (6.9, 6.0)):  # jitter at a rounding edge
+        st = status(pitch, roll)
+        assert not _progress_changed(st, _progress_line(st)[0], last)
+    st = status(12.5, 5.0)
+    assert _progress_changed(st, _progress_line(st)[0], last)

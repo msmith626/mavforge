@@ -211,12 +211,36 @@ def test_lowering_the_wrong_side_fails(fake: FakeVehicle) -> None:
     assert st.result.plan is None
 
 
-def test_board_not_square_to_the_vehicle_fails(fake: FakeVehicle) -> None:
+def test_first_pose_far_from_level_fails(fake: FakeVehicle) -> None:
+    # board rolled 22 degrees in the airframe, or the vehicle rested rolled: same reading
     with mavforge.connect(fake.connection_string, policy=CONFIGURE) as vehicle:
         st = run(vehicle, fake, rolled(22))
     assert st.result is not None
     assert st.result.status is OperationStatus.FAILED
-    assert "22 degrees from the nearest standard rotation" in st.result.summary
+    assert "The first pose was 22 degrees from level" in st.result.summary
+
+
+def test_first_pose_slightly_off_level_warns(fake: FakeVehicle) -> None:
+    with mavforge.connect(fake.connection_string, policy=CONFIGURE) as vehicle:
+        st = run(vehicle, fake, rolled(12))
+    assert st.state is CalibrationState.SUCCEEDED, st.result
+    assert st.result is not None
+    assert "matches how the board is mounted" in st.result.summary
+    assert any("first pose was 12 degrees from level" in w for w in st.result.warnings)
+
+
+def test_board_turned_between_standard_rotations_fails(fake: FakeVehicle) -> None:
+    # arrow turned 22.5 degrees right of the nose: halfway between None and Yaw45
+    s, c = math.sin(math.radians(22.5)), math.cos(math.radians(22.5))
+
+    def yawed(x: float, y: float, z: float) -> Vec:
+        return (c * x + s * y, -s * x + c * y, z)
+
+    with mavforge.connect(fake.connection_string, policy=CONFIGURE) as vehicle:
+        st = run(vehicle, fake, yawed)
+    assert st.result is not None
+    assert st.result.status is OperationStatus.FAILED
+    assert "arrow 22 degrees from the nearest standard rotation" in st.result.summary
 
 
 def test_custom_rotation_is_not_checked(fake: FakeVehicle) -> None:
