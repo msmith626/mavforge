@@ -71,4 +71,5 @@ Bench board: ArduPlane 4.6.2 over USB, unconfigured airframe, indoors (no GPS fi
 | Gyro, level calibration | passed | 2026-10-23 |
 | Radio calibration (Spektrum DX7s, 7 channels) | passed; matched the existing calibration within 2 µs | 2026-10-23 |
 | Board orientation check | passed; `AHRS_ORIENTATION=0` matches, confirmed by hand | 2026-10-23 |
+| Wireless link (WiFi, onboard module) | passed; `info`, `status`, full 1117-param download, no gaps. Bluetooth (BLE and classic SPP) ruled out — see [docs/wireless.md](wireless.md) | 2026-10-23 |
 | 6-position accelerometer calibration | not yet run | |

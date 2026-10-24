@@ -26,7 +26,10 @@ from mavforge.domain.errors import InvalidInputError
 DEFAULT_BAUD = 115200
 
 _HOST_RE = re.compile(r"^[A-Za-z0-9.\-]+$|^\[[0-9A-Fa-f:]+\]$")
-_DEVICE_RE = re.compile(r"^(/dev/[A-Za-z0-9._/\-]+|COM[0-9]+)$")
+# Spaces are allowed only after /dev/: macOS names a paired Bluetooth SPP device
+# after the product, e.g. "/dev/cu.SpeedyBee F405 WING-SPPDev". The /dev/ anchor
+# still keeps this from matching /bin/sh, /etc/passwd or other unsafe paths.
+_DEVICE_RE = re.compile(r"^(/dev/[A-Za-z0-9._/\- ]+|COM[0-9]+)$")
 
 
 class LinkKind(StrEnum):

@@ -12,6 +12,7 @@ on a real vehicle if the operator's ground station disappears.
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
 from collections import deque
@@ -44,15 +45,31 @@ class Transport(Protocol):
     def receive_errors(self) -> int: ...
 
 
-def open_failure_hint(spec: ConnectionSpec, exc: Exception) -> str:
-    """A short remedy for common link-opening failures, or an empty string."""
+def open_failure_hint(spec: ConnectionSpec, exc: Exception, *, platform: str = sys.platform) -> str:
+    """A short remedy for common link-opening failures, or an empty string.
+
+    ``platform`` defaults to the real ``sys.platform`` but is injectable so tests get
+    deterministic, OS-independent results (CI runs Linux; a contributor's machine may not).
+    """
+    if not spec.is_serial:
+        return ""
     text = str(exc)
-    if spec.is_serial and "Permission denied" in text:
+    # Checked before the generic "could not open port" match below: pyserial's message
+    # for a busy device also contains that phrase, so the specific case must win.
+    if "Resource busy" in text or "Device busy" in text:
         return (
-            ". On Linux, add your user to the group that owns the device "
-            "(usually 'dialout': sudo usermod -aG dialout $USER), then log in again"
+            ". The device is already open in another program (another mavforge "
+            "process, Arduino IDE, 'screen', a GCS, or — on macOS — the Bluetooth "
+            "pane in System Settings) — close it and try again"
         )
-    if spec.is_serial and ("No such file" in text or "could not open port" in text):
+    if "Permission denied" in text:
+        if platform.startswith("linux"):
+            return (
+                ". On Linux, add your user to the group that owns the device "
+                "(usually 'dialout': sudo usermod -aG dialout $USER), then log in again"
+            )
+        return ""
+    if "No such file" in text or "could not open port" in text:
         return ". Check the device path and that the flight controller is plugged in"
     return ""
 

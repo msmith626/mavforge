@@ -88,7 +88,9 @@ uv run mavforge -c /dev/ttyACM0 calibrate radio     # sweep the sticks, review t
 uv run mavforge -c /dev/ttyACM0 calibrate orientation  # tilt three ways: is AHRS_ORIENTATION right?
 ```
 
-To use a real flight controller over USB, run `mavforge -c /dev/ttyACM0 info`.
+To use a real flight controller over USB, run `mavforge -c /dev/ttyACM0 info`. For a
+wireless link instead (tested against a SpeedyBee F405 WING's onboard WiFi), see
+[docs/wireless.md](docs/wireless.md).
 
 Global options go before the command. You can also put the connection in
 `MAVFORGE_CONNECTION` instead of passing `-c`. Exit codes:
@@ -168,7 +170,7 @@ MAVFORGE_HW_CONNECTION=/dev/ttyACM0 uv run pytest -m hardware   # opt-in, read-o
 - [Assessment](docs/assessment.md): project state, positioning and gaps
 - [Research notes](docs/research.md): MAVLink, ArduPilot, Mission Planner and MCP findings, with sources
 - [Architecture](docs/architecture.md) · [Risks](docs/risks.md) · [Roadmap](docs/roadmap.md)
-- [Calibration](docs/calibration.md) · [SITL](docs/sitl.md) · [MCP setup](docs/mcp-setup.md) · [MAVForge and MAVProxy](docs/mavproxy.md)
+- [Calibration](docs/calibration.md) · [SITL](docs/sitl.md) · [MCP setup](docs/mcp-setup.md) · [MAVForge and MAVProxy](docs/mavproxy.md) · [Wireless links](docs/wireless.md)
 - [Contributing](CONTRIBUTING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## License

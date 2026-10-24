@@ -22,6 +22,13 @@ def test_accepts_network_and_serial_links(text: str, kind: LinkKind, pymavlink: 
     assert spec.to_pymavlink() == pymavlink
 
 
+def test_accepts_device_paths_with_spaces() -> None:
+    # macOS names a paired Bluetooth SPP device after the product, spaces included.
+    spec = parse_connection_string("/dev/cu.SpeedyBee F405 WING-SPPDev")
+    assert spec.kind is LinkKind.SERIAL
+    assert spec.to_pymavlink() == "/dev/cu.SpeedyBee F405 WING-SPPDev"
+
+
 def test_serial_baud_defaults_and_overrides() -> None:
     assert parse_connection_string("/dev/ttyACM0").baud == DEFAULT_BAUD
     assert parse_connection_string("/dev/ttyACM0,57600").baud == 57600

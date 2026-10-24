@@ -70,8 +70,28 @@ def test_missing_serial_device_reports_a_hint() -> None:
     assert "plugged in" in info.value.message
 
 
-def test_permission_denied_hint_mentions_dialout() -> None:
+def test_permission_denied_hint_mentions_dialout_on_linux() -> None:
     spec = parse_connection_string("/dev/ttyACM0")
     exc = OSError("[Errno 13] could not open port /dev/ttyACM0: [Errno 13] Permission denied")
-    assert "dialout" in open_failure_hint(spec, exc)
-    assert open_failure_hint(parse_connection_string("tcp:127.0.0.1:5760"), exc) == ""
+    assert "dialout" in open_failure_hint(spec, exc, platform="linux")
+    assert (
+        open_failure_hint(parse_connection_string("tcp:127.0.0.1:5760"), exc, platform="linux")
+        == ""
+    )
+
+
+def test_permission_denied_hint_has_no_dialout_advice_outside_linux() -> None:
+    spec = parse_connection_string("/dev/ttyACM0")
+    exc = OSError("[Errno 13] could not open port /dev/ttyACM0: [Errno 13] Permission denied")
+    assert open_failure_hint(spec, exc, platform="darwin") == ""
+
+
+def test_busy_device_hint_beats_the_generic_could_not_open_message() -> None:
+    spec = parse_connection_string("/dev/cu.usbmodem21201")
+    exc = OSError(
+        "[Errno 16] could not open port /dev/cu.usbmodem21201: "
+        "[Errno 16] Resource busy: '/dev/cu.usbmodem21201'"
+    )
+    hint = open_failure_hint(spec, exc, platform="darwin")
+    assert "already open in another program" in hint
+    assert "plugged in" not in hint
