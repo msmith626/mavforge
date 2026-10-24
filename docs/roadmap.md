@@ -21,8 +21,8 @@ Capabilities are claimed only once they are tested.
 
 Pick one of these:
 
-- **Hardware validation** on your ArduPlane 4.6.2 board: gyro and level calibration (radio
-  calibration passed on 2026-10-23).
+- **Hardware validation** on your ArduPlane 4.6.2 board: gyro, level and radio calibration
+  passed on 2026-10-23; the 6-position accelerometer calibration is still to do.
 - **Hardening:** reconnect during long operations, and the localhost HTTP MCP transport.
 - **More diagnostics rules:** servo output functions, plane airspeed setup, serial
   protocol conflicts, failsafe thresholds against battery capacity.
