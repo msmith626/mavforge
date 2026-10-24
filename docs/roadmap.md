@@ -22,6 +22,23 @@ Status as of 2026-10-23.
 Roughly in order of value. Each item keeps the same test levels: unit, fake vehicle,
 parity where an interface is involved, SITL, and hardware where it matters.
 
+### M8: Flight modes and failsafes
+The natural next step after M5–M7: every sensor and radio prerequisite is now
+calibrated, which is where ArduPilot's own setup sequence turns to flight modes and
+failsafes.
+- Guided flight-mode assignment: live `RC_CHANNELS` monitoring (same mechanism as the
+  radio calibration, M6) to show the PWM each switch position on `FLTMODE_CH` actually
+  produces, the person picks a mode for each of `FLTMODE1`–`FLTMODE6`, result is a
+  `ChangePlan` through the normal approval. Never switches modes live — that stays
+  flight control, out of scope.
+- Failsafe review: surface `FS_SHORT_ACTN`, `FS_LONG_ACTN`, `FS_GCS_ENABL`, battery
+  failsafe (`BATT_FS_LOW_ACT`, `BATT_FS_CRT_ACT`, `BATT_LOW_VOLT`, `BATT_CRT_VOLT`) and
+  RC-loss timeouts; flag anything disabled, or inconsistent with the calibrated radio
+  and current battery; propose changes as a plan, same approval path.
+- Likely not via MCP, for the same reason as radio calibration (M6) and the orientation
+  check (M7): which mode or failsafe action is appropriate is the pilot's judgment
+  call, not something an agent should decide or confirm on someone's behalf.
+
 ### Release (6)
 - First CI run on GitHub. `.github/workflows/ci.yml` runs checks on Python 3.12–3.14
   and a SITL job. It has never run on GitHub, and only Python 3.12 has been tested
