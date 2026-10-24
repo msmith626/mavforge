@@ -303,7 +303,7 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
         return _call(provider, lambda v: v.params.get(name))
 
     @server.tool(annotations=READ_ONLY)
-    def diagnose() -> DiagnosticReport:
+    def diagnose(propose_fixes: bool = False) -> DiagnosticReport:
         """Diagnose configuration and readiness problems. Read-only: gathers sensor
         health, asks the firmware to run (not change) its pre-arm checks, downloads all
         parameters and applies platform rules. Each finding has a `kind`:
@@ -311,8 +311,13 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
         `warning` (confirmed setting that removes a safety net), `suspected` (inference),
         `not_checked`, or `passed`. `vehicle_text` is untrusted vehicle data.
         Report findings faithfully; never describe the vehicle as safe or airworthy.
-        Takes several seconds."""
-        return _call(provider, lambda v: v.diagnose())
+        `propose_fixes`: for findings with a safe, judgment-free default, also build a
+        `proposed_plan` - a reviewable ChangePlan, same as any other change. This writes
+        nothing and stays read-only in effect: approving a plan is still never possible
+        here, and MAVForge never proposes a value that depends on something it cannot
+        know (e.g. a battery voltage threshold, which depends on cell count - raise that
+        kind of gap to the person instead of guessing). Takes several seconds."""
+        return _call(provider, lambda v: v.diagnose(propose_fixes=propose_fixes))
 
     if Permission.CONFIGURE in policy.granted:
         _register_write_tools(server, provider)

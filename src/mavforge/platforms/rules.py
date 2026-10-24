@@ -61,6 +61,7 @@ def finding(
     evidence: dict[str, float | int | str | bool | None] | None = None,
     recommendation: str | None = None,
     source: FindingSource = FindingSource.PARAMETERS,
+    proposed_changes: dict[str, float | int] | None = None,
 ) -> Finding:
     return Finding(
         check=rule.check if isinstance(rule, ParamRule) else rule,
@@ -70,6 +71,7 @@ def finding(
         source=source,
         evidence=evidence or {},
         recommendation=recommendation,
+        proposed_changes=proposed_changes,
     )
 
 

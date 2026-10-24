@@ -362,15 +362,49 @@ def _battery_failsafe(identity: VehicleIdentity, p: ParamView) -> list[Finding]:
                 "A battery monitor is configured but both low and critical failsafe "
                 "actions are 0 (no action / warn only).",
                 evidence=evidence,
-                recommendation="Set BATT_FS_LOW_ACT / BATT_FS_CRT_ACT and their thresholds.",
+                recommendation="Set BATT_FS_LOW_ACT / BATT_FS_CRT_ACT and their thresholds. "
+                "MAVForge does not propose specific actions here: which one is right (RTL, "
+                "Land, ...) is a judgment call for the pilot, same as flight-mode assignment.",
             )
+        ]
+    # An action can be configured but still unable to ever trigger, if its threshold was
+    # never set: BATT_LOW_VOLT/BATT_CRT_VOLT (or the _MAH equivalents) default to 0, and a
+    # configured action with a 0 threshold is exactly as inert as no action at all. Found by
+    # hand on this project's own bench vehicle before this check existed (docs/roadmap.md,
+    # M8/M9). No specific voltage is proposed: that depends on the pack's cell count, which
+    # MAVForge has no way to know, unlike radio/orientation's proposals (which come from live
+    # sensor readings, not a guess about hardware MAVForge never asked about).
+    no_threshold = []
+    for act, act_name, volt_name, mah_name in (
+        (low, "BATT_FS_LOW_ACT", "BATT_LOW_VOLT", "BATT_LOW_MAH"),
+        (crit, "BATT_FS_CRT_ACT", "BATT_CRT_VOLT", "BATT_CRT_MAH"),
+    ):
+        if act == 0:
+            continue
+        volt, mah = p.get(volt_name), p.get(mah_name)
+        if not volt and not mah:
+            no_threshold.append((act_name, act, volt_name, mah_name, volt, mah))
+    if no_threshold:
+        return [
+            finding(
+                BATTERY,
+                FindingKind.WARNING,
+                f"{act_name} has no threshold set",
+                f"{act_name}={act} but both {volt_name} and {mah_name} are 0 (or not "
+                "present on this firmware): this action can never trigger. MAVForge does "
+                "not propose a value here: the right voltage depends on the pack's cell "
+                "count, which MAVForge has no way to know.",
+                evidence=evidence | {volt_name: volt, mah_name: mah},
+                recommendation=f"Set {volt_name} (or {mah_name}) for your battery's cell count.",
+            )
+            for act_name, act, volt_name, mah_name, volt, mah in no_threshold
         ]
     return [
         finding(
             BATTERY,
             FindingKind.PASSED,
             "Battery failsafe configured",
-            "A low or critical battery action is set.",
+            "A low or critical battery action is set, with a threshold that can trigger it.",
             evidence=evidence,
         )
     ]
@@ -407,6 +441,7 @@ def _logging(identity: VehicleIdentity, p: ParamView) -> list[Finding]:
                 "LOG_BACKEND_TYPE=0: no flight logs will be available for analysis.",
                 evidence={"LOG_BACKEND_TYPE": value},
                 recommendation="Set LOG_BACKEND_TYPE=1 (File).",
+                proposed_changes={"LOG_BACKEND_TYPE": 1},
             )
         ]
     return [

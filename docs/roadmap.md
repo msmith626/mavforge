@@ -51,6 +51,19 @@ guessed). **This is two architecturally different pieces of work, not one featur
   not an assumption: unlike M8a there's no live human action involved, so the usual
   M6/M7 exclusion reasoning doesn't automatically carry over — though MCP still could
   never approve the plan it proposes.
+  - **Implemented** (2026-10-24): `Finding.proposed_changes`/`proposed_plan`,
+    `diagnose(propose_fixes=...)` (off by default — building a plan re-reads live
+    values and saves a plan file, a side effect a normally pure-read `diagnose` call
+    shouldn't have unasked), the extended `_battery_failsafe` rule (catches exactly the
+    action-without-threshold gap found by hand this session), and one demonstration
+    case with a genuinely safe default (`LOG_BACKEND_TYPE`). Deliberately does **not**
+    propose a specific battery voltage: that needs cell-count information MAVForge has
+    no way to know, the same reasoning applied live, by a person, earlier this session.
+    Exposed via MCP (the open question above, now answered): `propose_fixes` only ever
+    builds a plan, never applies one, so it stays as read-only in effect as `diagnose`
+    itself. CLI `--propose-fixes`; API and MCP parameter of the same name. Covered by
+    unit (rules), fake-vehicle integration, CLI and MCP tests — **not yet** run against
+    SITL or hardware, so not yet claimed as fully done by this project's own bar.
 
 ### M9: Guided vehicle setup ("wizard")
 Ties M1–M8 together into one guided first-time setup, instead of requiring a person

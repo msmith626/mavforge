@@ -13,7 +13,8 @@ from typer.testing import CliRunner, Result
 
 from mavforge.cli.app import app
 from mavforge.domain.errors import ExitCode
-from mavforge.testing.fake_vehicle import FakeFactory, FakeVehicle
+from mavforge.domain.models import ParamType
+from mavforge.testing.fake_vehicle import FakeFactory, FakeVehicle, default_copter_params
 from mavforge.testing.scenarios import unconfigured_plane_params
 from mavforge.transport.dialect import mavlink
 
@@ -162,6 +163,19 @@ def test_diagnose_output_and_fail_on(make_fake: FakeFactory) -> None:
     assert invoke(*base, "--fail-on", "bogus")[0] == ExitCode.USAGE
     code, stdout, _ = invoke(*base, "--show-passed")
     assert "[passed] Accelerometer calibration present" in stdout
+
+
+def test_diagnose_propose_fixes(make_fake: FakeFactory) -> None:
+    fake = make_fake(params=default_copter_params() | {"LOG_BACKEND_TYPE": (0, ParamType.INT8)})
+    base = ("-c", fake.connection_string, "diagnose", "--prearm-wait", "0.5")
+    code, stdout, _ = invoke(*base)
+    assert code == ExitCode.OK
+    assert "[WARNING] Onboard logging is disabled" in stdout
+    assert "proposes a fix" not in stdout  # not built unless asked
+
+    code, stdout, _ = invoke(*base, "--propose-fixes")
+    assert code == ExitCode.OK
+    assert "proposes a fix: `mavforge params apply " in stdout
 
 
 def test_diagnose_fail_on_passes_for_clean_vehicle(fake: FakeVehicle) -> None:

@@ -367,6 +367,20 @@ class Finding(_Model):
     evidence: dict[str, float | int | str | bool | None] = Field(default_factory=dict)
     recommendation: str | None = None
     vehicle_text: Annotated[str | None, Field(description=UNTRUSTED_TEXT)] = None
+    proposed_changes: dict[str, float | int] | None = Field(
+        default=None,
+        description="Parameter values this finding would fix, as name -> value. Set only "
+        "by rules with a safe, judgment-free default (e.g. enabling something with no "
+        "tradeoff); never a value that depends on something MAVForge cannot know, such as "
+        "a battery voltage threshold that depends on cell count.",
+    )
+    proposed_plan: ChangePlan | None = Field(
+        default=None,
+        description="A validated plan built from proposed_changes against the live "
+        "vehicle, present only when diagnose() was asked to propose fixes "
+        "(propose_fixes=True) and the plan could be built. Nothing is written: the plan "
+        "still needs the normal approve -> apply path, same as any other change.",
+    )
 
 
 class DiagnosticReport(_Model):

@@ -158,11 +158,54 @@ def test_throttle_failsafe(params: dict[str, Any], expected: FindingKind) -> Non
     [
         ({"BATT_MONITOR": 0}, FindingKind.WARNING),
         ({"BATT_MONITOR": 4, "BATT_FS_LOW_ACT": 0, "BATT_FS_CRT_ACT": 0}, FindingKind.WARNING),
-        ({"BATT_MONITOR": 4, "BATT_FS_LOW_ACT": 1, "BATT_FS_CRT_ACT": 0}, FindingKind.PASSED),
+        # Action set, but no threshold either -> this session's own bench bug.
+        ({"BATT_MONITOR": 4, "BATT_FS_LOW_ACT": 1, "BATT_FS_CRT_ACT": 0}, FindingKind.WARNING),
+        (
+            {
+                "BATT_MONITOR": 4,
+                "BATT_FS_LOW_ACT": 1,
+                "BATT_FS_CRT_ACT": 0,
+                "BATT_LOW_VOLT": 14.0,
+            },
+            FindingKind.PASSED,
+        ),
+        # The _MAH threshold counts just as well as voltage.
+        (
+            {
+                "BATT_MONITOR": 4,
+                "BATT_FS_LOW_ACT": 1,
+                "BATT_FS_CRT_ACT": 0,
+                "BATT_LOW_MAH": 300,
+            },
+            FindingKind.PASSED,
+        ),
     ],
 )
 def test_battery(params: dict[str, Any], expected: FindingKind) -> None:
     assert kinds(rules.BATTERY, params) == [expected]
+
+
+def test_battery_no_action_does_not_propose_a_specific_one() -> None:
+    # No safe default action exists (RTL vs Land vs ... is a judgment call), unlike the
+    # thresholdless case below, which also doesn't propose a value (needs cell count).
+    result = run_rule(
+        rules.BATTERY,
+        ident("plane"),
+        ParamView({"BATT_MONITOR": 4, "BATT_FS_LOW_ACT": 0, "BATT_FS_CRT_ACT": 0}),
+    )
+    assert result[0].proposed_changes is None
+
+
+def test_battery_no_threshold_names_the_action_and_does_not_propose_a_voltage() -> None:
+    result = run_rule(
+        rules.BATTERY,
+        ident("plane"),
+        ParamView({"BATT_MONITOR": 4, "BATT_FS_LOW_ACT": 1, "BATT_FS_CRT_ACT": 2}),
+    )
+    titles_seen = [f.title for f in result]
+    assert "BATT_FS_LOW_ACT has no threshold set" in titles_seen
+    assert "BATT_FS_CRT_ACT has no threshold set" in titles_seen
+    assert all(f.proposed_changes is None for f in result)
 
 
 def test_gps_logging_and_frame() -> None:
@@ -171,6 +214,13 @@ def test_gps_logging_and_frame() -> None:
     assert kinds(rules.LOGGING, {"LOG_BACKEND_TYPE": 0}) == [FindingKind.WARNING]
     assert kinds(rules.FRAME, {"FRAME_CLASS": 0}, "copter") == [FindingKind.FAULT]
     assert kinds(rules.FRAME, {}, "plane") == []  # not applicable to planes
+
+
+def test_logging_proposes_a_safe_default() -> None:
+    # No judgment call here (unlike battery failsafe actions): enabling logging has no
+    # tradeoff, so it's the one rule allowed to propose a specific value.
+    result = run_rule(rules.LOGGING, ident("plane"), ParamView({"LOG_BACKEND_TYPE": 0}))
+    assert result[0].proposed_changes == {"LOG_BACKEND_TYPE": 1}
 
 
 def test_missing_parameters_become_not_checked() -> None:

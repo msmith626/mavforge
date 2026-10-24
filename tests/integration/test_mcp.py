@@ -9,10 +9,11 @@ import anyio
 import pytest
 from mcp import Client, StdioServerParameters
 
+from mavforge.domain.models import ParamType
 from mavforge.mcp.server import VehicleProvider, build_server
 from mavforge.policy.permissions import Policy
 from mavforge.services.session import ConnectOptions
-from mavforge.testing.fake_vehicle import FakeFactory, FakeVehicle
+from mavforge.testing.fake_vehicle import FakeFactory, FakeVehicle, default_copter_params
 
 TOOLS = {
     "mavforge_capabilities",
@@ -175,3 +176,19 @@ def test_diagnose_tool(make_fake: FakeFactory) -> None:
     findings = result.structured_content["findings"]
     assert findings[0]["kind"] == "fault"
     assert findings[0]["vehicle_text"] == "PreArm: Need 3D Fix"
+
+
+def test_diagnose_tool_propose_fixes(make_fake: FakeFactory) -> None:
+    fake = make_fake(params=default_copter_params() | {"LOG_BACKEND_TYPE": (0, ParamType.INT8)})
+    off = call(fake.connection_string, "diagnose")
+    logging_off = next(
+        f for f in off.structured_content["findings"] if f["check"] == "ardupilot.logging"
+    )
+    assert logging_off["proposed_changes"] == {"LOG_BACKEND_TYPE": 1}
+    assert logging_off["proposed_plan"] is None
+
+    on = call(fake.connection_string, "diagnose", {"propose_fixes": True})
+    logging_on = next(
+        f for f in on.structured_content["findings"] if f["check"] == "ardupilot.logging"
+    )
+    assert logging_on["proposed_plan"]["changes"][0]["requested"] == 1

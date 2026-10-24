@@ -11,6 +11,7 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime, timedelta
 
+from mavforge.domain.errors import MAVForgeError
 from mavforge.domain.models import (
     DiagnosticReport,
     Finding,
@@ -26,6 +27,7 @@ from mavforge.protocol.commands import CommandOutcome, send_command
 from mavforge.protocol.messages import request_messages
 from mavforge.services.backup import build_backup
 from mavforge.services.catalog import DIAGNOSE, run_operation
+from mavforge.services.changes import plan_changes
 from mavforge.services.session import Session
 from mavforge.services.status import build_status
 from mavforge.transport.dialect import Message, mavlink
@@ -267,6 +269,26 @@ def _param_findings(session: Session, backup: ParamBackup) -> list[Finding]:
     return findings
 
 
+def _propose_fix(session: Session, f: Finding) -> Finding:
+    """Build a live, reviewable ChangePlan for a finding's proposed_changes, if any.
+
+    Nothing is written: like every other plan, it still needs the normal approve ->
+    apply path. If the plan can't be built (e.g. the vehicle rejects the values), the
+    finding is returned unchanged rather than failing the whole diagnose() call.
+    """
+    if not f.proposed_changes:
+        return f
+    try:
+        plan = plan_changes(
+            session,
+            f.proposed_changes,
+            extra_warnings=[f"Proposed by diagnose finding {f.check!r}: {f.title}."],
+        )
+    except MAVForgeError:
+        return f
+    return f.model_copy(update={"proposed_plan": plan})
+
+
 def build_report(
     session: Session,
     status: StatusReport,
@@ -274,6 +296,8 @@ def build_report(
     outcome: CommandOutcome,
     texts: list[StatusText],
     uptime: float | None = None,
+    *,
+    propose_fixes: bool = False,
 ) -> DiagnosticReport:
     findings = (
         _uptime_findings(uptime, status)
@@ -281,6 +305,8 @@ def build_report(
         + _telemetry_findings(status, session)
         + _param_findings(session, backup)
     )
+    if propose_fixes:
+        findings = [_propose_fix(session, f) for f in findings]
     findings.sort(key=lambda f: _KIND_ORDER.index(f.kind))
     partial = (
         bool(status.unavailable)
@@ -297,12 +323,27 @@ def build_report(
     )
 
 
-def diagnose(session: Session, *, prearm_wait: float = DEFAULT_PREARM_WAIT) -> DiagnosticReport:
+def diagnose(
+    session: Session,
+    *,
+    prearm_wait: float = DEFAULT_PREARM_WAIT,
+    propose_fixes: bool = False,
+) -> DiagnosticReport:
+    """Classified findings from pre-arm reports, sensor health and configuration rules.
+
+    ``propose_fixes``: for findings with a safe, judgment-free default, also build a
+    live ChangePlan (``Finding.proposed_plan``). Off by default: diagnose() is otherwise
+    a pure read, and building a plan re-reads current values and saves a plan file
+    (see services.changes.plan_changes) as a side effect.
+    """
+
     def run() -> DiagnosticReport:
         status = build_status(session)
         uptime = vehicle_uptime(session)
         outcome, texts = request_prearm_report(session, prearm_wait)
         backup = build_backup(session)
-        return build_report(session, status, backup, outcome, texts, uptime)
+        return build_report(
+            session, status, backup, outcome, texts, uptime, propose_fixes=propose_fixes
+        )
 
     return run_operation(session, DIAGNOSE, run)

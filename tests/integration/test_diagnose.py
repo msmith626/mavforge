@@ -3,9 +3,9 @@
 from typing import Any
 
 import mavforge
-from mavforge.domain.models import FindingKind, FindingSource
+from mavforge.domain.models import FindingKind, FindingSource, ParamType
 from mavforge.domain.outcomes import OperationStatus
-from mavforge.testing.fake_vehicle import FakeFactory
+from mavforge.testing.fake_vehicle import FakeFactory, default_copter_params
 from mavforge.testing.scenarios import unconfigured_plane_params
 from mavforge.transport.dialect import mavlink
 
@@ -95,6 +95,31 @@ def test_recent_boot_is_flagged(make_fake: FakeFactory) -> None:
     uptime = [f for f in report.findings if f.check == "vehicle.uptime"]
     assert [f.kind for f in uptime] == [FindingKind.WARNING]
     assert uptime[0].title == "Vehicle started recently"
+
+
+def test_propose_fixes_is_off_by_default(make_fake: FakeFactory) -> None:
+    fake = make_fake(params=default_copter_params() | {"LOG_BACKEND_TYPE": (0, ParamType.INT8)})
+    with mavforge.connect(fake.connection_string) as vehicle:
+        report = vehicle.diagnose(prearm_wait=1.0)  # propose_fixes defaults to False
+    logging_finding = next(f for f in report.findings if f.check == "ardupilot.logging")
+    assert logging_finding.proposed_changes == {"LOG_BACKEND_TYPE": 1}
+    assert logging_finding.proposed_plan is None  # not built unless asked
+
+
+def test_propose_fixes_builds_a_reviewable_plan(make_fake: FakeFactory) -> None:
+    fake = make_fake(params=default_copter_params() | {"LOG_BACKEND_TYPE": (0, ParamType.INT8)})
+    with mavforge.connect(fake.connection_string) as vehicle:
+        report = vehicle.diagnose(prearm_wait=1.0, propose_fixes=True)
+    logging_finding = next(f for f in report.findings if f.check == "ardupilot.logging")
+    plan = logging_finding.proposed_plan
+    assert plan is not None
+    assert plan.blocked is False
+    assert [(c.name, c.requested) for c in plan.changes] == [("LOG_BACKEND_TYPE", 1)]
+    # Nothing was written: it's a plan like any other, still needing approve -> apply.
+    assert plan.changes[0].current == 0
+    # Findings with no safe default (the battery judgment call) are left alone.
+    battery_findings = [f for f in report.findings if f.check == "ardupilot.battery_failsafe"]
+    assert all(f.proposed_plan is None for f in battery_findings)
 
 
 def test_initialising_vehicle_is_flagged_even_without_uptime(make_fake: FakeFactory) -> None:

@@ -198,12 +198,19 @@ class Vehicle:
     def status(self) -> StatusReport:
         return status_service.snapshot(self.session)
 
-    def diagnose(self, *, prearm_wait: float = DEFAULT_PREARM_WAIT) -> DiagnosticReport:
+    def diagnose(
+        self, *, prearm_wait: float = DEFAULT_PREARM_WAIT, propose_fixes: bool = False
+    ) -> DiagnosticReport:
         """Classified findings from pre-arm reports, sensor health and configuration rules.
 
         Read-only: also asks the firmware to run (not change) its pre-arm checks.
+        ``propose_fixes``: also build a live ChangePlan for findings with a safe,
+        judgment-free default (``Finding.proposed_plan``). Nothing is written: the
+        plan still needs the normal approve -> apply path.
         """
-        return diagnostics_service.diagnose(self.session, prearm_wait=prearm_wait)
+        return diagnostics_service.diagnose(
+            self.session, prearm_wait=prearm_wait, propose_fixes=propose_fixes
+        )
 
     @property
     def is_connected(self) -> bool:

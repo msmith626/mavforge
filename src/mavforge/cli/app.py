@@ -435,6 +435,14 @@ def make_render_diagnose(show_passed: bool) -> Callable[[DiagnosticReport], None
                 out.print(Text("    vehicle says: ").append(safe(f.vehicle_text)))
             if f.recommendation:
                 out.print(Text(f"    -> {f.recommendation}", style="cyan"))
+            if f.proposed_plan:
+                out.print(
+                    Text(
+                        f"    -> plan {f.proposed_plan.plan_id} proposes a fix: "
+                        f"`mavforge params apply {f.proposed_plan.plan_id}`",
+                        style="cyan",
+                    )
+                )
         counts = ", ".join(f"{n} {k.value}" for k, n in r.counts.items())
         out.print(Text(f"Summary: {counts}", style="bold"))
         if not show_passed and r.counts.get(FindingKind.PASSED):
@@ -657,6 +665,14 @@ def diagnose(
             help="Exit 1 if any finding is at least this serious: 'fault' or 'warning'.",
         ),
     ] = None,
+    propose_fixes: Annotated[
+        bool,
+        typer.Option(
+            "--propose-fixes",
+            help="Also build a plan for findings with a safe default fix. Nothing is "
+            "written: review and apply with 'params apply'.",
+        ),
+    ] = False,
 ) -> None:
     """Find configuration and readiness problems, classified by certainty (read-only)."""
     if fail_on not in (None, "fault", "warning"):
@@ -670,7 +686,7 @@ def diagnose(
 
     _with_vehicle(
         ctx,
-        lambda v: v.diagnose(prearm_wait=prearm_wait),
+        lambda v: v.diagnose(prearm_wait=prearm_wait, propose_fixes=propose_fixes),
         make_render_diagnose(show_passed),
         exit_code,
     )
