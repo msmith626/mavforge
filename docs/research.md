@@ -132,6 +132,88 @@ Mission Planner uses only the STATUSTEXT; MAVForge will require both.
 **SITL**
 - `-M calibration` (`libraries/SITL/SIM_Calibration.cpp`) supports accel and compass calibration, with poses driven through SERVO5–8. ArduPilot's autotest `AccelCal` and `SITLCompassCalibration` tests are the model for MAVForge's future SITL calibration tests.
 
+## Flight modes and failsafes (planned; behaviour for M8)
+
+Sources:
+- ArduPilot `libraries/RC_Channel/RC_Channel.cpp` (`read_6pos_switch`), tag `Plane-4.6.2`
+- `https://autotest.ardupilot.org/Parameters/versioned/Plane/stable-4.6.2/apm.pdef.xml` — the
+  same metadata source MAVForge's own change plans cite (`metadata_source` field)
+
+All items in this section are **[source]** unless marked otherwise.
+
+**This is two different shapes of work, not one feature** — the single most important
+scoping finding. Conflating them would produce the wrong architecture for one of them.
+
+**Flight-mode assignment is a guided workflow**, the same shape as radio calibration
+(M6) and the orientation check (M7): it needs to watch live `RC_CHANNELS` while a
+person moves a switch, so it belongs as a new `Workflow` subclass
+(`CalibrationKind.FLIGHT_MODES`), not a diagnostics rule.
+- `FLTMODE_CH`: 0 = disabled (no mode channel read at all), 1–16 = that RC channel.
+- `RC_Channel::read_6pos_switch` maps the channel's raw PWM to one of six positions
+  with these exact breakpoints (confirmed directly in source, not inferred from the
+  nominal 1165/1295/.../1815 centre values the docs quote):
+
+  | PWM | Position | Parameter |
+  |---|---|---|
+  | < 1231 | 0 | `FLTMODE1` |
+  | 1231–1360 | 1 | `FLTMODE2` |
+  | 1361–1490 | 2 | `FLTMODE3` |
+  | 1491–1620 | 3 | `FLTMODE4` |
+  | 1621–1749 | 4 | `FLTMODE5` |
+  | ≥ 1750 | 5 | `FLTMODE6` |
+
+  Boundaries are fixed, not configurable, and use raw receiver PWM — `RCn_MIN`/`RCn_MAX`
+  on the mode channel don't move them. **[unverified]**: the ~0.2 s debounce before a
+  position change takes effect is widely documented but not yet confirmed against this
+  same source file.
+- A guided workflow for this would, like radio calibration, request `RC_CHANNELS` at
+  10 Hz on `FLTMODE_CH`, show the live PWM and which of the six bands it falls in as the
+  person flips the switch, let them pick a mode per band (from the firmware's own
+  `FLTMODE1` value-list metadata, same as every other `ChangePlan`), and propose
+  `FLTMODE1`–`FLTMODE6` as a plan — writing nothing itself, same as M6/M7.
+- Same reasoning as M6/M7 for **not via MCP**: which mode belongs on which switch
+  position is the pilot's judgment call, not something to infer from telemetry alone.
+
+**Failsafe review is a diagnostics extension, not a guided workflow** — there is no
+physical action for a person to perform; it is a static read of already-known
+parameters, the exact shape `diagnose` already has. It should extend
+`services/diagnostics.py` / `platforms/ardupilot/rules.py`, not add a new
+`CalibrationKind`.
+- `FS_SHORT_ACTN` (short failsafe, ≥`FS_SHORT_TIMEOUT`, default 1.5 s): `0`
+  CIRCLE/no-change-if-already-in-AUTO|GUIDED|LOITER, `1` CIRCLE, `2` FBWA at zero
+  throttle, `3` Disable, `4` FBWB.
+- `FS_LONG_ACTN` (long failsafe, ≥`FS_LONG_TIMEOUT`, default 5 s): `0` Continue, `1`
+  RTL, `2` Glide, `3` Deploy Parachute, `4` Auto.
+- `FS_GCS_ENABL`: `0` Disabled, `1` Heartbeat, `2` HeartbeatAndREMRSSI, `3`
+  HeartbeatAndAUTO — triggers after `FS_LONG_TIMEOUT` with no MAVLink heartbeat.
+  ArduPilot's own parameter description warns that enabling it can let the motor keep
+  running on the ground after contact is lost, and recommends `ARMING_REQUIRED` on
+  electric planes if it's on. **Directly relevant to MAVForge**: the project's own
+  design choice to never send a HEARTBEAT (README, "Safety model") means a vehicle with
+  `FS_GCS_ENABL` enabled will, after `FS_LONG_TIMEOUT`, treat MAVForge's own presence as
+  no different from no GCS at all — worth calling out explicitly in whatever this rule
+  reports, not just checking the parameter is non-zero.
+- Battery failsafe (`BATT_FS_LOW_ACT`, `BATT_FS_CRT_ACT`, `BATT_LOW_VOLT`,
+  `BATT_CRT_VOLT`, and the `_MAH` equivalents) is already on the roadmap as a
+  Diagnostics item ("failsafe thresholds against battery capacity") — this session's
+  bench vehicle is the motivating case: an action configured with its threshold left at
+  the default `0`, so it could never trigger. The rule needs to check the action and its
+  threshold together, not either alone.
+- This needs one piece of new plumbing the existing rules don't have: a way for a
+  finding to carry a proposed fix. `Finding` (`domain/models.py`) has no field for one
+  today. The natural shape is a `proposed_plan: ChangePlan | None` field, built by
+  calling `services.changes.plan_changes()` (a plain function, already independent of
+  the calibration machinery) from within the rule, the same way radio/orientation build
+  their plan at the end of a run. This is exactly the existing roadmap item "findings
+  that propose a parameter plan" — this review is its first real use, not a separate
+  thing.
+- **Open question, deliberately not decided here**: should this be available via MCP?
+  Unlike flight-mode assignment there is no live human action involved — it's exactly
+  as read-only as `diagnose` itself, which already is MCP-available. An agent proposing
+  a plan is not the same as an agent approving one (MCP still can't do that), so there
+  isn't an obvious safety reason to exclude it the way M6/M7 are excluded. Worth a
+  deliberate decision when this is built, not an assumption either way.
+
 ## MCP
 
 Sources: https://modelcontextprotocol.io/specification/2026-07-28, https://github.com/modelcontextprotocol/python-sdk

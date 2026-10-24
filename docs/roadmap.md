@@ -25,19 +25,32 @@ parity where an interface is involved, SITL, and hardware where it matters.
 ### M8: Flight modes and failsafes
 The natural next step after M5–M7: every sensor and radio prerequisite is now
 calibrated, which is where ArduPilot's own setup sequence turns to flight modes and
-failsafes.
-- Guided flight-mode assignment: live `RC_CHANNELS` monitoring (same mechanism as the
-  radio calibration, M6) to show the PWM each switch position on `FLTMODE_CH` actually
-  produces, the person picks a mode for each of `FLTMODE1`–`FLTMODE6`, result is a
-  `ChangePlan` through the normal approval. Never switches modes live — that stays
-  flight control, out of scope.
-- Failsafe review: surface `FS_SHORT_ACTN`, `FS_LONG_ACTN`, `FS_GCS_ENABL`, battery
-  failsafe (`BATT_FS_LOW_ACT`, `BATT_FS_CRT_ACT`, `BATT_LOW_VOLT`, `BATT_CRT_VOLT`) and
-  RC-loss timeouts; flag anything disabled, or inconsistent with the calibrated radio
-  and current battery; propose changes as a plan, same approval path.
-- Likely not via MCP, for the same reason as radio calibration (M6) and the orientation
-  check (M7): which mode or failsafe action is appropriate is the pilot's judgment
-  call, not something an agent should decide or confirm on someone's behalf.
+failsafes. Scoped in detail in [research.md](research.md#flight-modes-and-failsafes-planned-behaviour-for-m8)
+(exact `RC_Channel::read_6pos_switch` PWM breakpoints and `FS_*`/`BATT_FS_*` value
+metadata, both pulled from ArduPilot source and the firmware's own `apm.pdef.xml`, not
+guessed). **This is two architecturally different pieces of work, not one feature:**
+
+- **M8a — Guided flight-mode assignment.** A new guided `Workflow`
+  (`CalibrationKind.FLIGHT_MODES`), the same shape as radio calibration (M6): live
+  `RC_CHANNELS` monitoring of `FLTMODE_CH` to show the PWM and which of the six fixed
+  bands it falls in as the person flips the switch, they pick a mode for each of
+  `FLTMODE1`–`FLTMODE6`, result is a `ChangePlan` through the normal approval. Never
+  switches modes live — that stays flight control, out of scope. Not via MCP, same
+  reasoning as M6/M7: which mode belongs on which switch position is the pilot's call.
+- **M8b — Failsafe review.** Not a guided workflow — there's no physical action
+  involved, so this is a `diagnose` extension (`services/diagnostics.py` /
+  `platforms/ardupilot/rules.py`), reading `FS_SHORT_ACTN`, `FS_LONG_ACTN`,
+  `FS_GCS_ENABL`, and battery failsafe (`BATT_FS_LOW_ACT`/`_CRT_ACT` together with
+  `BATT_LOW_VOLT`/`BATT_CRT_VOLT` — this session's bench vehicle is the motivating
+  case: an action configured with its threshold left at the default `0`, so neither
+  could ever trigger). Needs one schema change the existing rules don't have: a
+  `proposed_plan` field on `Finding`, built with the already-independent
+  `services.changes.plan_changes()`. This is the first real use of the existing
+  Diagnostics item "findings that propose a parameter plan," not a separate thing.
+  Whether this one is MCP-available is an open question worth a deliberate decision,
+  not an assumption: unlike M8a there's no live human action involved, so the usual
+  M6/M7 exclusion reasoning doesn't automatically carry over — though MCP still could
+  never approve the plan it proposes.
 
 ### M9: Guided vehicle setup ("wizard")
 Ties M1–M8 together into one guided first-time setup, instead of requiring a person
