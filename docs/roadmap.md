@@ -39,6 +39,39 @@ failsafes.
   check (M7): which mode or failsafe action is appropriate is the pilot's judgment
   call, not something an agent should decide or confirm on someone's behalf.
 
+### M9: Guided vehicle setup ("wizard")
+Ties M1–M8 together into one guided first-time setup, instead of requiring a person
+(or an AI assistant) to already know ArduPilot's setup order and which steps apply to
+their vehicle. This session is the motivating example: a first-time owner, walked
+through orientation, calibration, radio, flight modes and failsafes one conversation
+at a time, with the AI assistant supplying the sequence and the "why" from its own
+general knowledge rather than from anything MAVForge itself knows or verifies.
+- A setup-status view, derived from the vehicle's actual capabilities and current
+  parameters (not a fixed checklist): which steps are done (with evidence, as
+  calibration already records), which are needed, which don't apply (e.g. no airspeed
+  sensor fitted), and which are optional-but-recommended (e.g. battery failsafe
+  thresholds, terrain) — the battery-failsafe gap found by hand in this session
+  (actions configured, thresholds left at 0, so neither could ever trigger) is exactly
+  the shape of thing this view exists to catch without a person needing to think to
+  check it.
+- CLI: a `mavforge setup` that walks the sequence end to end, reusing every existing
+  mechanism (the calibration state machines, the radio sweep, the orientation check,
+  flight-mode/failsafe plans from M8) and skipping whatever the vehicle already has
+  evidence for.
+- MCP: the same status/sequence exposed as a tool, so an AI assistant drives the
+  conversation from MAVForge's own knowledge of what this specific vehicle needs and
+  in what order, with every actual change still going through the normal
+  approve → apply → read-back path. The assistant becomes the conversational layer
+  over a checklist MAVForge owns and can verify, rather than the sole source of what
+  "setup" even means for this vehicle.
+- Overlaps with the "Findings that propose a parameter plan" item under Diagnostics
+  below: a rule that notices a configured failsafe action with no threshold (or any
+  other finding with an obvious fix) and proposes the plan itself is a building block
+  this wizard would call directly, rather than relying on a person or an AI to notice.
+- Only ArduPilot/plane has the engineering depth for this today (the generic adapter
+  is read-only); the checklist content, like calibration and radio, would need to be
+  per-platform-family rather than universal.
+
 ### Release (6)
 - First CI run on GitHub. `.github/workflows/ci.yml` runs checks on Python 3.12–3.14
   and a SITL job. It has never run on GitHub, and only Python 3.12 has been tested
