@@ -53,7 +53,7 @@ generic read-only adapter that has not been tested.
 Requires Python ≥ 3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```sh
-git clone <this repo> mavforge && cd mavforge
+git clone https://github.com/msmith626/mavforge.git && cd mavforge
 uv sync
 uv run mavforge --help
 ```
