@@ -37,6 +37,19 @@ guessed). **This is two architecturally different pieces of work, not one featur
   `FLTMODE1`–`FLTMODE6`, result is a `ChangePlan` through the normal approval. Never
   switches modes live — that stays flight control, out of scope. Not via MCP, same
   reasoning as M6/M7: which mode belongs on which switch position is the pilot's call.
+  - **Implemented** (2026-10-24): `services/calibration/flight_modes.py`
+    (`FlightModeWorkflow`), a single guided sweep step that discretises `FLTMODE_CH`'s
+    live PWM into the six fixed bands (breakpoints confirmed directly against
+    `RC_Channel::read_6pos_switch`) and checks whether each requested `FLTMODEn`'s band
+    was actually reached. The person supplies the target values up front
+    (`FLTMODEn=VALUE`, the same syntax as `params set`) — MAVForge never picks a mode
+    for a position, consistent with the "pilot's judgment call" reasoning above. CLI
+    `calibrate flight-modes FLTMODE1=0 FLTMODE3=5 ...`; Python
+    `vehicle.calibration.start_flight_modes({...})`. Covered by unit tests (the exact
+    breakpoints, including contiguity across the full PWM range) and fake-vehicle
+    integration tests (plan proposed, applied after approval, a requested-but-unreached
+    band flagged as a warning not a failure, disabled mode channel, unknown parameter
+    name, nothing requested, MCP refusal). **Not yet** run against SITL or hardware.
 - **M8b — Failsafe review.** Not a guided workflow — there's no physical action
   involved, so this is a `diagnose` extension (`services/diagnostics.py` /
   `platforms/ardupilot/rules.py`), reading `FS_SHORT_ACTN`, `FS_LONG_ACTN`,

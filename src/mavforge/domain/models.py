@@ -511,6 +511,7 @@ class CalibrationKind(StrEnum):
     ACCEL = "accel"
     RADIO = "radio"
     ORIENTATION = "orientation"
+    FLIGHT_MODES = "flight_modes"
 
 
 class CalibrationState(StrEnum):
@@ -581,6 +582,19 @@ class Tilt(_Model):
     pitch_deg: float = Field(description="Positive: nose up.")
 
 
+class FlightModeBand(_Model):
+    """One of the six fixed FLTMODE_CH bands (ArduPilot's RC_Channel::read_6pos_switch;
+    confirmed in source, not inferred from the nominal centre PWM values the wiki quotes)."""
+
+    band: int = Field(description="0-5; FLTMODEn is band n-1.")
+    parameter: str = Field(description="e.g. 'FLTMODE1'.")
+    current: int | None = Field(default=None, description="Currently configured mode value.")
+    pwm_seen: int | None = Field(default=None, description="Latest PWM seen inside this band.")
+    visited: bool = Field(
+        description="The switch produced a PWM inside this band during the sweep."
+    )
+
+
 class CalibrationResult(_Model):
     status: OperationStatus
     summary: str
@@ -618,6 +632,9 @@ class CalibrationStatus(_Model):
     rc_channels: list[RcChannelRange] = Field(default_factory=list)
     tilt: Tilt | None = Field(
         default=None, description="Live tilt as the autopilot sees it (orientation check)."
+    )
+    mode_bands: list[FlightModeBand] = Field(
+        default_factory=list, description="Live FLTMODE_CH band report (flight-mode check)."
     )
     vehicle_messages: list[StatusText] = Field(
         default_factory=list, description="STATUSTEXT received during the calibration."

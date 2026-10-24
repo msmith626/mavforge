@@ -36,6 +36,7 @@ from mavforge.services import plan_store
 from mavforge.services.calibration.accel import AccelWorkflow
 from mavforge.services.calibration.base import CalibrationCancelled, Workflow, WorkflowContext
 from mavforge.services.calibration.compass import CompassWorkflow
+from mavforge.services.calibration.flight_modes import FlightModeWorkflow
 from mavforge.services.calibration.orientation import OrientationWorkflow
 from mavforge.services.calibration.radio import RadioWorkflow
 from mavforge.services.calibration.simple import GyroWorkflow, LevelWorkflow
@@ -57,6 +58,7 @@ WORKFLOWS: dict[CalibrationKind, Callable[[], Workflow]] = {
     CalibrationKind.ACCEL: AccelWorkflow,
     CalibrationKind.RADIO: RadioWorkflow,
     CalibrationKind.ORIENTATION: OrientationWorkflow,
+    CalibrationKind.FLIGHT_MODES: FlightModeWorkflow,
 }
 
 _STATE_FOR_STATUS = {

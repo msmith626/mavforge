@@ -1043,6 +1043,59 @@ calibrate_app.command("orientation")(
 )
 
 
+@calibrate_app.command("flight-modes")
+def calibrate_flight_modes(
+    ctx: typer.Context,
+    assignments: Annotated[list[str], typer.Argument(help="One or more FLTMODEn=VALUE.")],
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Apply the proposed values without asking.")
+    ] = False,
+    plan_only: Annotated[
+        bool, typer.Option(help="Save the change plan for later review; write nothing.")
+    ] = False,
+    offline: Annotated[bool, typer.Option(help="Do not download parameter metadata.")] = False,
+) -> None:
+    """Flight mode assignment: sweep the mode switch, review the FLTMODEn plan, apply it.
+
+    Same NAME=VALUE syntax as 'params set', e.g. 'mavforge calibrate flight-modes
+    FLTMODE1=0 FLTMODE3=5'. Watches the switch to confirm it can actually produce every
+    position being assigned before proposing anything."""
+    requested = _parse_or_fail(ctx, assignments)
+
+    def act(vehicle: mavforge.Vehicle) -> CalibrationStatus | ApplyResult:
+        kind = CalibrationKind.FLIGHT_MODES
+        proc = next(p for p in vehicle.calibration.procedures() if p.kind is kind)
+        render_procedure(proc, err)
+        if not proc.supported:
+            raise NotApprovedError(f"{proc.title} is not available: {proc.reason}")
+        st = _follow(
+            vehicle,
+            vehicle.calibration.start_flight_modes(requested, offline=offline),
+            "Press Enter when done (Ctrl-C to cancel)",
+        )
+        result = st.result
+        plan = result.plan if result else None
+        if (
+            plan_only
+            or result is None
+            or result.status is not OperationStatus.SUCCEEDED
+            or plan is None
+            or all(c.no_change for c in plan.changes)
+        ):
+            return st
+        render_calibration(st, err)
+        try:
+            _confirm_and_approve(plan, yes)
+        except NotApprovedError as exc:
+            raise NotApprovedError(
+                f"{exc.message}. The plan is saved: `mavforge -c <connection> params apply "
+                f"{plan.plan_id}` applies it later."
+            ) from exc
+        return vehicle.params.apply(plan)
+
+    _with_vehicle(ctx, act, render_proposal, _proposal_exit, policy=_WRITE_POLICY)
+
+
 @calibrate_app.command("list")
 def calibrate_list(ctx: typer.Context) -> None:
     """Describe every calibration: preconditions, steps, effects (no vehicle needed)."""

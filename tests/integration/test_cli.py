@@ -277,7 +277,7 @@ def test_calibrate_list_needs_no_vehicle() -> None:
     code, stdout, _ = invoke("--json", "calibrate", "list")
     assert code == ExitCode.OK
     kinds = [p["kind"] for p in json.loads(stdout)["procedures"]]
-    assert kinds == ["gyro", "level", "compass", "accel", "radio", "orientation"]
+    assert kinds == ["gyro", "level", "compass", "accel", "radio", "orientation", "flight_modes"]
 
 
 class _GatedInput(io.BytesIO):
@@ -393,6 +393,62 @@ class _PosingInput(io.BytesIO):
         return super().readline()
 
     read1 = read  # type: ignore[assignment]
+
+
+def _person_at_mode_switch(fake: FakeVehicle, gate: threading.Event) -> None:
+    """Wait until MAVForge reads RC input, flip the switch through three positions."""
+
+    def rc_requests() -> int:
+        return sum(
+            isinstance(m, mavlink.MAVLink_command_long_message)
+            and m.command == mavlink.MAV_CMD_REQUEST_MESSAGE
+            and int(m.param1) == mavlink.MAVLINK_MSG_ID_RC_CHANNELS
+            for m in fake.received
+        )
+
+    deadline = time.monotonic() + 10
+    while rc_requests() < 3 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    for pwm in (1100, 1425, 2000):  # positions 1, 3, 6 (bands 0, 2, 5)
+        fake.set_rc(1500, 1500, 1500, 1500, pwm)
+        time.sleep(0.3)
+    gate.set()
+
+
+def test_calibrate_flight_modes_cli_sweeps_then_applies_after_approval(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeVehicle
+) -> None:
+    fake.set_param("FLTMODE_CH", 5, ParamType.INT8)
+    for n in range(1, 7):
+        fake.set_param(f"FLTMODE{n}", 0, ParamType.INT8)
+    gate = threading.Event()
+    stdin = _GatedInput(b"\ny\n", gate)
+
+    def input_stream(_input: object, _charset: str) -> _GatedInput:
+        return stdin
+
+    monkeypatch.setattr(typer.testing, "make_input_stream", input_stream)
+    person = threading.Thread(target=_person_at_mode_switch, args=(fake, gate), daemon=True)
+    person.start()
+    result = runner.invoke(
+        app,
+        [
+            "-c",
+            fake.connection_string,
+            "calibrate",
+            "flight-modes",
+            "FLTMODE1=0",
+            "FLTMODE3=5",
+            "--offline",
+        ],
+        env={"MAVFORGE_CONNECTION": None},
+    )
+    person.join(5)
+    assert result.exit_code == ExitCode.OK, result.output
+    assert "band reached" in result.stderr
+    assert "Write 1 parameter(s)" in result.stderr  # FLTMODE1 unchanged, FLTMODE3 changes
+    assert fake.config.params["FLTMODE3"][0] == 5
+    assert fake.config.params["FLTMODE1"][0] == 0
 
 
 def test_calibrate_orientation_cli_proposes_then_applies(

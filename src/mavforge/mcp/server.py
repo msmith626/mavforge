@@ -438,6 +438,9 @@ _CLI_ONLY_CALIBRATIONS = {
     "every stick and confirm each step; ask them to run `mavforge calibrate radio`.",
     CalibrationKind.ORIENTATION: "The orientation check needs the person at the vehicle to "
     "tilt it and confirm three positions; ask them to run `mavforge calibrate orientation`.",
+    CalibrationKind.FLIGHT_MODES: "Which mode belongs on which switch position is the "
+    "pilot's judgment call, not something to infer from telemetry; ask them to run "
+    "`mavforge calibrate flight-modes FLTMODEn=VALUE ...`.",
 }
 
 
@@ -447,8 +450,8 @@ def _register_calibration_tools(server: MCPServer, provider: VehicleProvider) ->
         """Create a request to run a calibration (gyro, level or compass). Does NOT start
         it. Explain the procedure (calibration_procedures) to the user first: they must
         be at the vehicle. Then call calibration_start with the returned plan_id.
-        The 6-position accelerometer and radio calibrations and the orientation check are
-        not available over MCP."""
+        The 6-position accelerometer and radio calibrations, the orientation check, and
+        flight-mode assignment are not available over MCP."""
         if message := _CLI_ONLY_CALIBRATIONS.get(kind):
             raise ToolError(json.dumps({"error": "unsupported", "message": message}))
         return _call(provider, lambda v: v.calibration.request(kind))

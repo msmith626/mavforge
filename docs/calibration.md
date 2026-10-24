@@ -62,6 +62,7 @@ needs a reboot, the result says so.
 | Accelerometer, 6 positions | yes | success, failure, silence, cancel | **passed** (`calibration` model) | not yet | **no** |
 | Radio (RC) | yes (GCS-side sweep, proposes a change plan) | success, apply after approval, unmoved/uncentred/throttle-high, reversed throttle, RCMAP, jitter, no receiver, receiver in failsafe, cancel, armed | **passed** (`RC_CHANNELS_OVERRIDE` from the test) | **passed** on ArduPlane 4.6.2 (Spektrum DX7s, 7 channels; result matched the existing calibration to within 2 us) | **no** |
 | Board orientation check | yes (three poses, proposes `AHRS_ORIENTATION` as a change plan) | correct, arrow right, upside down, wrong current setting, live tilt, too little tilt, shaking, wrong side, not square, custom rotation, no IMU data, cancel, permissions | **passed** (`SIM_IMU_ORIENT=2`: proposed 6, applied, re-check matched) | **passed** on ArduPlane 4.6.2, hand-held (0 matches, as confirmed by hand; heading within 5°, first pose 9° off level) | **no** |
+| Flight mode assignment | yes (sweeps `FLTMODE_CH`, proposes `FLTMODE1..6` as a change plan) | plan proposed + applied, band reached/not reached, disabled mode channel, unknown parameter, no request, cancel, permissions | not yet | not yet | **no** |
 
 Other autopilots use the generic adapter, which declares no calibrations.
 
@@ -280,6 +281,52 @@ calibrates in the sensor frame, before the board rotation.
   autopilot sees, and the evidence names where the arrow points; compare that with the
   board.
 - External compasses have their own `COMPASS_ORIENTn` and aren't checked.
+
+## Flight mode assignment
+
+`FLTMODE_CH` selects a flight mode by six fixed PWM bands — not configurable, and not
+moved by `RCn_MIN`/`RCn_MAX` on that channel (`RC_Channel::read_6pos_switch`, confirmed
+directly against ArduPilot source; see [research.md](research.md#flight-modes-and-failsafes-planned-behaviour-for-m8)
+for the exact breakpoints). Like radio calibration and the orientation check, nothing
+is written by the check itself: the result is a change plan for whichever
+`FLTMODEn` values were requested.
+
+**Needs:** the vehicle disarmed; transmitter on and the receiver bound; `FLTMODE_CH`
+already set to the channel the mode switch is on.
+
+**You supply the target values up front** (`FLTMODEn=VALUE`, same syntax as
+`params set`) — MAVForge never picks a mode for a switch position. Which mode belongs
+where is the pilot's judgment call, the same reasoning as the other guided checks.
+
+**Sequence:**
+1. MAVForge reads `FLTMODE_CH`. `0` (disabled) fails immediately: no channel is read for
+   flight mode at all.
+2. It requests `RC_CHANNELS` (65) via `MAV_CMD_REQUEST_MESSAGE` at 10 Hz, discretising
+   that channel's PWM into the six fixed bands as the person flips the switch, live.
+3. **Sweep.** The person flips the switch through every position they use, pausing
+   briefly on each, then confirms. For every `FLTMODEn` being requested, MAVForge
+   checks whether its band was actually reached during the sweep.
+
+**Plan.** Every requested `FLTMODEn` is proposed, whether or not its band was reached —
+an unreached band is a warning ("check the switch/mixing"), not a reason to withhold the
+value, since the person may be setting up a position they haven't wired yet.
+
+**Success:** a `succeeded` result means the parameters named exist and a plan was
+recorded (`result.plan`). As with radio calibration, it does **not** mean anything was
+written: that needs the normal approval.
+
+**Interfaces:**
+- **CLI:** `mavforge calibrate flight-modes FLTMODE1=0 FLTMODE3=5 ...` (with `--yes`,
+  `--plan-only`, `--offline`, as for radio).
+- **Python:** `vehicle.calibration.start_flight_modes({"FLTMODE1": 0, ...})`.
+- **Permissions:** the sweep needs only read permission. Applying needs `configure`.
+- **Not over MCP:** which mode belongs on which switch position is the pilot's
+  judgment call, not something to infer from telemetry — the same reasoning as radio
+  calibration and the orientation check.
+
+**Limits:** the sweep only validates that the switch *can* reach a requested band, not
+that your transmitter's mixing or the receiver's failsafe behaviour matches what you
+expect in flight.
 
 ## Recovery
 

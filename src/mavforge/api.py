@@ -51,6 +51,7 @@ from mavforge.services import params as params_service
 from mavforge.services import plan_store
 from mavforge.services import status as status_service
 from mavforge.services.calibration import operations as calibration_ops
+from mavforge.services.calibration.flight_modes import FlightModeWorkflow
 from mavforge.services.calibration.orientation import OrientationWorkflow
 from mavforge.services.calibration.radio import RadioWorkflow
 from mavforge.services.diagnostics import DEFAULT_PREARM_WAIT
@@ -164,6 +165,22 @@ class Calibration:
             self._session,
             CalibrationKind.ORIENTATION,
             workflow=OrientationWorkflow(offline=offline),
+        )
+
+    def start_flight_modes(
+        self, requested: dict[str, float], *, offline: bool = False
+    ) -> CalibrationStatus:
+        """Start a flight-mode check: watches FLTMODE_CH while you flip the switch, then
+        proposes ``requested`` (FLTMODE1..FLTMODE6, e.g. ``{"FLTMODE3": 5}``) as a change
+        plan once every requested position has been confirmed reachable.
+
+        Like :meth:`start_radio`, it writes nothing; ``result.plan`` proposes the
+        requested values, flagging any that the switch never actually produced.
+        """
+        return calibration_ops.REGISTRY.start_observation(
+            self._session,
+            CalibrationKind.FLIGHT_MODES,
+            workflow=FlightModeWorkflow(requested, offline=offline),
         )
 
     def status(self, operation_id: str) -> CalibrationStatus:

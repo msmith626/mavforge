@@ -98,6 +98,18 @@ def test_person_guided_checks_are_refused_over_mcp(fake: FakeVehicle, kind: str)
     assert f"mavforge calibrate {kind}" in result.content[0].text
 
 
+def test_flight_mode_assignment_is_refused_over_mcp(fake: FakeVehicle) -> None:
+    # The CLI command is spelled with a hyphen ("flight-modes"), unlike the enum value
+    # ("flight_modes") the kind argument takes - deliberately not folded into the
+    # parametrized case above, which assumes they match.
+    async def steps(client: Client) -> Any:
+        return await client.call_tool("calibration_request", {"kind": "flight_modes"})
+
+    result = run(fake, CAL, steps, accept)
+    assert result.is_error
+    assert "mavforge calibrate flight-modes" in result.content[0].text
+
+
 def test_accel_request_made_elsewhere_is_still_refused_over_mcp(fake: FakeVehicle) -> None:
     with mavforge.connect(fake.connection_string) as vehicle:
         request = vehicle.calibration.request("accel")
