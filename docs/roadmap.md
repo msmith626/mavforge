@@ -85,31 +85,32 @@ their vehicle. This session is the motivating example: a first-time owner, walke
 through orientation, calibration, radio, flight modes and failsafes one conversation
 at a time, with the AI assistant supplying the sequence and the "why" from its own
 general knowledge rather than from anything MAVForge itself knows or verifies.
-- A setup-status view, derived from the vehicle's actual capabilities and current
-  parameters (not a fixed checklist): which steps are done (with evidence, as
-  calibration already records), which are needed, which don't apply (e.g. no airspeed
-  sensor fitted), and which are optional-but-recommended (e.g. battery failsafe
-  thresholds, terrain) — the battery-failsafe gap found by hand in this session
-  (actions configured, thresholds left at 0, so neither could ever trigger) is exactly
-  the shape of thing this view exists to catch without a person needing to think to
-  check it.
-- CLI: a `mavforge setup` that walks the sequence end to end, reusing every existing
-  mechanism (the calibration state machines, the radio sweep, the orientation check,
-  flight-mode/failsafe plans from M8) and skipping whatever the vehicle already has
-  evidence for.
-- MCP: the same status/sequence exposed as a tool, so an AI assistant drives the
-  conversation from MAVForge's own knowledge of what this specific vehicle needs and
-  in what order, with every actual change still going through the normal
-  approve → apply → read-back path. The assistant becomes the conversational layer
-  over a checklist MAVForge owns and can verify, rather than the sole source of what
-  "setup" even means for this vehicle.
-- Overlaps with the "Findings that propose a parameter plan" item under Diagnostics
-  below: a rule that notices a configured failsafe action with no threshold (or any
-  other finding with an obvious fix) and proposes the plan itself is a building block
-  this wizard would call directly, rather than relying on a person or an AI to notice.
-- Only ArduPilot/plane has the engineering depth for this today (the generic adapter
-  is read-only); the checklist content, like calibration and radio, would need to be
-  per-platform-family rather than universal.
+Scoped in detail in [research.md](research.md#guided-setup-wizard-planned-behaviour-for-m9).
+The key finding there: most of the "is this done" signal **already exists**, as
+`diagnose`'s findings (`ardupilot.accel_cal`, `.compass_cal`, `.rc_cal`,
+`.battery_failsafe`, ...) — M9 is mostly plumbing to read that signal as a sequence,
+not a new detection engine. Two things genuinely don't exist yet and are scoped
+accordingly, not treated as blockers:
+- **Orientation and flight-mode "done-ness" can't come from parameters alone** —
+  `AHRS_ORIENTATION=0`/`FLTMODE_CH=0` are exactly as likely to be "correct" as "never
+  set." These stay `unknown, run the check` rather than a false verdict (`FLTMODE_CH=0`
+  specifically is a clean "not set up" signal and could get its own small rule, mirroring
+  `_rc_cal`'s existing "probably never done" pattern).
+- **A true "was this verified for this exact vehicle" signal needs the audit log's
+  read side**, which doesn't exist (`AuditLog` is write-only today — `record()` appends,
+  nothing reads it back). Building that is real, separate work; v1 relies only on live
+  parameters and leaves audit-backed verification as a deliberate second version.
+- `setup_status(session)`: read-only, same risk tier as `diagnose` (built from one call
+  to it), reports `done`/`needed`/`recommended`/`unknown`/`not_applicable` per step.
+- **CLI `mavforge setup` is a dashboard, not an orchestrator**: shows the checklist and
+  the exact next command to run, rather than driving six workflows' confirmation flows
+  itself. Every command it points at already has its own tests and approval path.
+- **MCP `setup_status`**: read-only, same tier as `diagnose`. An AI assistant gets the
+  checklist from MAVForge itself, then drives the conversation with the *existing*
+  tools — gyro/level/compass over MCP; radio, orientation, flight-modes and accel still
+  point at the CLI, exactly as `calibration_request` already explains per kind.
+- Only ArduPilot/plane has the engineering depth for this today; the generic adapter
+  reports everything `not_applicable`.
 
 ### Release (6)
 - First CI run on GitHub. `.github/workflows/ci.yml` runs checks on Python 3.12–3.14

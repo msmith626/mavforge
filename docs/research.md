@@ -214,6 +214,73 @@ parameters, the exact shape `diagnose` already has. It should extend
   isn't an obvious safety reason to exclude it the way M6/M7 are excluded. Worth a
   deliberate decision when this is built, not an assumption either way.
 
+## Guided setup wizard (planned; behaviour for M9)
+
+The key finding here isn't from an external source — it's from reading MAVForge's own
+code: **most of the "is this done" signal the wizard needs already exists**, as
+`diagnose`'s findings. M9 is mostly plumbing to interpret that signal as a sequence,
+not a new detection engine.
+
+**What already answers "is this configured" today**, by `Finding.check`:
+- `ardupilot.accel_cal`, `ardupilot.compass_cal`: `FAULT` if uncalibrated.
+- `ardupilot.rc_cal`: `SUSPECTED` ("probably never done") if every primary channel is
+  still at the firmware default.
+- `ardupilot.throttle_failsafe`, `ardupilot.battery_failsafe`: `WARNING` if disabled,
+  and — since M8b — `battery_failsafe` can carry a `proposed_plan` for the "no action"
+  case specifically.
+- `ardupilot.gps_configured`, `ardupilot.logging`, `ardupilot.arming_checks`,
+  `ardupilot.frame_class` (copter/heli only): all `WARNING`/`PASSED` from a single
+  parameter read, no live sensor interaction needed.
+
+**What has no passive signal at all today**, and why:
+- **Gyro and level calibration (M5)**: `INS_GYROFFS_*`/`AHRS_TRIM_X/Y` existing and
+  non-zero *could* be checked (the same shape as the existing `accel_cal` rule), but
+  no rule does this yet. A real gap worth filling as a small addition alongside M9, not
+  a reason to block it.
+- **Board orientation (M7)**: fundamentally can't be answered from parameters alone.
+  `AHRS_ORIENTATION=0` is exactly as likely to be "correct for this board" as "never
+  set" — only the gravity-based check (three poses) tells them apart. At best, a new
+  rule could flag "`AHRS_ORIENTATION` is still the firmware default" as `SUSPECTED`,
+  the same honesty `_rc_cal` already uses for "probably never done."
+- **Flight-mode assignment (M8a)**: same shape as orientation — `FLTMODE_CH=0`
+  (disabled) is a clean, confident signal ("not set up"), but whether the six
+  `FLTMODEn` values are *right* can't be derived from parameters, only from flying or
+  from the M8a sweep. A rule could add the `FLTMODE_CH=0` case cleanly; "are the six
+  values sensible" has to stay a recommendation to run the check, not a verdict.
+
+**What a true "was this verified for this exact vehicle" signal would need, and why
+it's deliberately out of scope for a first version:** the audit log
+(`~/.local/state/mavforge/audit.jsonl`, `policy/audit.py`) already records every
+operation's outcome per vehicle identity — in principle, "did a successful orientation
+check run on *this* vehicle since its last reboot" is answerable from it. But today
+`AuditLog` is write-only: `record()` appends; nothing reads it back. Building that
+read side (parse JSONL, filter by vehicle identity and event, define what counts as
+"still valid" — a parameter changing since the last run should invalidate it) is real,
+separate work. **First version of M9 should rely only on live parameters** (what
+`diagnose` already provides) and treat orientation/flight-modes as "unknown, run the
+check" rather than attempting a false done/not-done verdict from an audit trail that
+doesn't exist yet. Audit-backed verification is a good second version, not a blocker.
+
+**Shape that falls out of this:**
+- A `setup_status(session)` service, read-only, same risk tier as `diagnose` (in fact
+  built from one call to it): walks a small, ordered table of setup steps
+  (orientation → calibration → radio → flight modes → failsafes/logging/GPS/arming),
+  maps each to a `Finding.check` id where one exists, and reports `done` / `needed` /
+  `recommended` / `unknown` / `not_applicable` accordingly. Only ArduPilot has the
+  rule depth for this; the generic adapter reports everything `not_applicable`.
+- **CLI `mavforge setup` is a dashboard, not an orchestrator.** It shows the ordered
+  checklist and, for anything not `done`, the exact command to run next
+  (`mavforge calibrate orientation`, etc.) — it does not itself drive six different
+  guided workflows through one invocation. Building an auto-walk-through would mean
+  reimplementing each workflow's confirmation/approval flow control inside `setup`
+  itself; a dashboard that points at the real commands is far less to get wrong, and
+  every one of those commands already has its own tests and approval path.
+- **MCP `setup_status`**: read-only, same tier as `diagnose` — an AI assistant gets the
+  checklist and the vehicle's own knowledge of what it needs, then drives the
+  conversation using the *existing* tools (gyro/level/compass over MCP; radio,
+  orientation, flight-modes and accel still point the person at the CLI, exactly as
+  `calibration_request` already explains for each).
+
 ## MCP
 
 Sources: https://modelcontextprotocol.io/specification/2026-07-28, https://github.com/modelcontextprotocol/python-sdk
