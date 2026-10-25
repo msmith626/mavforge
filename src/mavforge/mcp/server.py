@@ -46,6 +46,7 @@ from mavforge.domain.models import (
     ParamGetResult,
     ParamListResult,
     PlanListResult,
+    SetupReport,
     StatusReport,
 )
 from mavforge.domain.values import format_value
@@ -318,6 +319,21 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
         know (e.g. a battery voltage threshold, which depends on cell count - raise that
         kind of gap to the person instead of guessing). Takes several seconds."""
         return _call(provider, lambda v: v.diagnose(propose_fixes=propose_fixes))
+
+    @server.tool(annotations=READ_ONLY)
+    def setup_status() -> SetupReport:
+        """ArduPilot's own first-time setup sequence, as a checklist. Read-only: built
+        from one diagnose() call, reinterpreted as an ordered sequence (orientation,
+        sensor calibration, radio, flight modes, then failsafes/logging/GPS/arming).
+        Each step's `status` is `done`, `needed` (confirmed problem), `recommended`
+        (worth doing), `unknown` (can't be told from parameters alone - board
+        orientation, gyro and level calibration are always this; run the named `run`
+        command to know for sure), or `not_applicable`. `next_step` is the first step
+        that isn't done, in sequence order - use it to tell the user what to do next,
+        not necessarily the most serious finding. For steps gyro/level/compass are
+        available over MCP (calibration_request); radio, orientation, flight-modes and
+        accel need the person at the CLI, exactly as calibration_request explains."""
+        return _call(provider, lambda v: v.setup_status())
 
     if Permission.CONFIGURE in policy.granted:
         _register_write_tools(server, provider)

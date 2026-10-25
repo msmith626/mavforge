@@ -46,6 +46,8 @@ from mavforge.domain.models import (
     ParamPresence,
     ParamValue,
     PlanListResult,
+    SetupReport,
+    SetupStepStatus,
     StatusReport,
 )
 from mavforge.domain.outcomes import OperationStatus, exit_code_for
@@ -690,6 +692,42 @@ def diagnose(
         make_render_diagnose(show_passed),
         exit_code,
     )
+
+
+_STEP_STYLE = {
+    SetupStepStatus.DONE: ("done", "green"),
+    SetupStepStatus.NEEDED: ("NEEDED", "bold red"),
+    SetupStepStatus.RECOMMENDED: ("recommended", "yellow"),
+    SetupStepStatus.UNKNOWN: ("unknown", "dim"),
+    SetupStepStatus.NOT_APPLICABLE: ("n/a", "dim"),
+}
+
+
+def render_setup(r: SetupReport) -> None:
+    out.print(Text(f"Setup for {r.vehicle.autopilot} system {r.vehicle.system_id}", style="bold"))
+    for s in r.steps:
+        label, style = _STEP_STYLE[s.status]
+        out.print(Text(f"[{label}] ", style=style).append(Text(s.title, style="bold")))
+        if s.status is not SetupStepStatus.DONE:
+            out.print(Text(f"    {s.detail}"))
+        if s.run and s.status is not SetupStepStatus.DONE:
+            out.print(Text(f"    -> {s.run}", style="cyan"))
+    if r.next_step:
+        out.print(Text(f"Next: {r.next_step.title}", style="bold"))
+    else:
+        out.print(Text("Every step MAVForge can check is done.", style="bold green"))
+    out.print(Text(r.disclaimer, style="dim"))
+    _status_line(r.status)
+
+
+@app.command()
+def setup(ctx: typer.Context) -> None:
+    """ArduPilot's own setup sequence as a checklist, and what to run next (read-only).
+
+    A dashboard, not an orchestrator: it names the next command rather than running
+    calibrations itself. A few steps (board orientation, gyro, level) can't be told
+    from parameters alone and are always 'unknown' - run the guided check to know."""
+    _with_vehicle(ctx, lambda v: v.setup_status(), render_setup, _status_exit_code)
 
 
 @params_app.command("list")

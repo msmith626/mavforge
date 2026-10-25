@@ -111,11 +111,30 @@ accordingly, not treated as blockers:
   point at the CLI, exactly as `calibration_request` already explains per kind.
 - Only ArduPilot/plane has the engineering depth for this today; the generic adapter
   reports everything `not_applicable`.
+- **Implemented** (2026-10-24): `services/setup.py` (`setup_status`), built from exactly
+  the design above — a single `diagnose()` call reinterpreted against a small ordered
+  table. Along the way, added the one new rule the design called for
+  (`ardupilot.flight_modes`: `FLTMODE_CH=0` → `SUSPECTED`, mirroring `_rc_cal`'s
+  pattern) and fixed a real gap found while building M8a: `CALIBRATE_FLIGHT_MODES` had
+  never been added to the capabilities catalog, so `mavforge capabilities` didn't list
+  it at all. CLI `mavforge setup` (a dashboard: the checklist plus the exact next
+  command, never running a workflow itself); API `vehicle.setup_status()`; MCP
+  `setup_status`, read-only. Covered by unit tests (the pure interpretation logic,
+  against a synthetic `DiagnosticReport`), fake-vehicle integration tests (fully
+  configured, an unconfigured plane, the new `FLTMODE_CH=0` case), CLI, MCP, and
+  parity (API/CLI/MCP agree) — **and** a SITL test, since SITL now runs on this Mac
+  (see Release, below): confirmed against real ArduCopter 4.7.2 firmware that
+  orientation/gyro/level correctly stay `unknown` and the sequence order is right.
 
 ### Release (6)
 - First CI run on GitHub. `.github/workflows/ci.yml` runs checks on Python 3.12–3.14
-  and a SITL job. It has never run on GitHub, and only Python 3.12 has been tested
-  locally.
+  and a SITL job. It has never run on GitHub.
+- SITL run on this Mac for the first time (2026-10-24), Python 3.14.7, under Colima
+  (`--vm-type=vz --vz-rosetta`, native arm64 VM; Rosetta accelerates the `linux/amd64`
+  SITL image rather than emulating a full x86_64 VM, which is far slower): all 17
+  existing SITL tests passed against real ArduCopter 4.7.2 firmware. No SITL test
+  exists yet specifically for M8a (flight-mode assignment) or M8b (`propose_fixes`) —
+  this confirms the existing suite and the environment, not new coverage for M8.
 - API, CLI and MCP reference docs; a compatibility matrix backed by test evidence;
   CONTRIBUTING; version 0.1.0 (and possibly a PyPI release).
 - A fresh-clone quick start, verified on a second machine.

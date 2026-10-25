@@ -75,6 +75,7 @@ def default_copter_params() -> dict[str, ParamSpec]:
         "BATT_FS_CRT_ACT": (1, ParamType.INT8),
         "BATT_LOW_VOLT": (14.0, ParamType.REAL32),
         "BATT_CRT_VOLT": (13.2, ParamType.REAL32),
+        "FLTMODE_CH": (5, ParamType.INT8),
         "GPS1_TYPE": (1, ParamType.INT8),
         "LOG_BACKEND_TYPE": (1, ParamType.INT8),
         "INS_GYROFFS_X": (0.0011, ParamType.REAL32),

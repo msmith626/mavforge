@@ -37,6 +37,7 @@ from mavforge.domain.models import (
     ParamGetResult,
     ParamListResult,
     PlanListResult,
+    SetupReport,
     StatusReport,
     VehicleIdentity,
 )
@@ -49,6 +50,7 @@ from mavforge.services import diff as diff_service
 from mavforge.services import info as info_service
 from mavforge.services import params as params_service
 from mavforge.services import plan_store
+from mavforge.services import setup as setup_service
 from mavforge.services import status as status_service
 from mavforge.services.calibration import operations as calibration_ops
 from mavforge.services.calibration.flight_modes import FlightModeWorkflow
@@ -228,6 +230,14 @@ class Vehicle:
         return diagnostics_service.diagnose(
             self.session, prearm_wait=prearm_wait, propose_fixes=propose_fixes
         )
+
+    def setup_status(self) -> SetupReport:
+        """ArduPilot's own first-time setup sequence, as a checklist derived from
+        diagnose()'s findings: done / needed / recommended / unknown / not_applicable
+        per step. Read-only; see services/setup.py for what each status means and why
+        a few steps (board orientation, gyro, level) are always reported ``unknown``.
+        """
+        return setup_service.setup_status(self.session)
 
     @property
     def is_connected(self) -> bool:

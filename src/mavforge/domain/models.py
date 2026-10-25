@@ -395,6 +395,44 @@ class DiagnosticReport(_Model):
     link: LinkStats
 
 
+class SetupStepStatus(StrEnum):
+    DONE = "done"
+    NEEDED = "needed"
+    """Confirmed problem (a FAULT-level finding)."""
+    RECOMMENDED = "recommended"
+    """Worth doing, not urgent (a WARNING or SUSPECTED finding)."""
+    UNKNOWN = "unknown"
+    """Can't be told from parameters alone (e.g. board orientation); run the guided
+    check to know for sure. Also used when the parameter download was incomplete."""
+    NOT_APPLICABLE = "not_applicable"
+    """No rule for this vehicle family/firmware (e.g. FRAME_CLASS on a plane)."""
+
+
+class SetupStep(_Model):
+    """One step in ArduPilot's own setup sequence, interpreted from diagnose's findings
+    (or named explicitly unknown, for the few things parameters alone can't answer)."""
+
+    step: str = Field(description="Stable id: a Finding.check, or a CalibrationKind value.")
+    title: str
+    status: SetupStepStatus
+    detail: str
+    run: str | None = Field(default=None, description="Command that addresses this step.")
+    finding: Finding | None = Field(
+        default=None, description="The diagnose finding this step was read from, if any."
+    )
+
+
+class SetupReport(_Model):
+    status: OperationStatus
+    vehicle: VehicleIdentity
+    steps: list[SetupStep]
+    next_step: SetupStep | None = Field(
+        default=None,
+        description="First step that isn't done or not_applicable, in setup order.",
+    )
+    disclaimer: str = AIRWORTHINESS_DISCLAIMER
+
+
 PLAN_FORMAT = "mavforge.param-plan"
 
 

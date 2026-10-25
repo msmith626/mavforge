@@ -216,6 +216,18 @@ def test_gps_logging_and_frame() -> None:
     assert kinds(rules.FRAME, {}, "plane") == []  # not applicable to planes
 
 
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({"FLTMODE_CH": 0}, FindingKind.SUSPECTED),  # disabled: never set up
+        ({"FLTMODE_CH": 5}, FindingKind.PASSED),  # a channel is read (not: the 6 values are right)
+        ({}, FindingKind.NOT_CHECKED),
+    ],
+)
+def test_flight_modes(params: dict[str, Any], expected: FindingKind) -> None:
+    assert kinds(rules.FLIGHT_MODES, params) == [expected]
+
+
 def test_logging_proposes_a_safe_default() -> None:
     # No judgment call here (unlike battery failsafe actions): enabling logging has no
     # tradeoff, so it's the one rule allowed to propose a specific value.

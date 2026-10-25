@@ -430,6 +430,34 @@ def _gps_configured(identity: VehicleIdentity, p: ParamView) -> list[Finding]:
     ]
 
 
+def _flight_modes(identity: VehicleIdentity, p: ParamView) -> list[Finding]:
+    (channel,) = p.require("FLTMODE_CH")
+    if channel == 0:
+        return [
+            finding(
+                FLIGHT_MODES,
+                FindingKind.SUSPECTED,
+                "Flight modes probably never assigned",
+                "FLTMODE_CH=0 (Disabled): no RC channel is read for flight mode, so "
+                "whatever FLTMODE1-6 currently hold is never selected by a switch.",
+                evidence={"FLTMODE_CH": channel},
+                recommendation="Set FLTMODE_CH to your mode switch's channel, then run "
+                "'mavforge calibrate flight-modes'.",
+            )
+        ]
+    # This only confirms a channel is read, not that the six values are sensible —
+    # that needs the live switch sweep (calibrate flight-modes), not a parameter read.
+    return [
+        finding(
+            FLIGHT_MODES,
+            FindingKind.PASSED,
+            "A flight-mode channel is configured",
+            f"FLTMODE_CH={channel}.",
+            evidence={"FLTMODE_CH": channel},
+        )
+    ]
+
+
 def _logging(identity: VehicleIdentity, p: ParamView) -> list[Finding]:
     (value,) = p.require("LOG_BACKEND_TYPE")
     if value == 0:
@@ -492,5 +520,17 @@ BATTERY = ParamRule(
 GPS = ParamRule("ardupilot.gps_configured", "GPS configuration", _gps_configured)
 LOGGING = ParamRule("ardupilot.logging", "Onboard logging", _logging)
 FRAME = ParamRule("ardupilot.frame_class", "Frame class", _frame_class)
+FLIGHT_MODES = ParamRule("ardupilot.flight_modes", "Flight mode assignment", _flight_modes)
 
-RULES: list[ParamRule] = [ARMING, ACCEL, COMPASS, RC, THROTTLE_FS, BATTERY, GPS, LOGGING, FRAME]
+RULES: list[ParamRule] = [
+    ARMING,
+    ACCEL,
+    COMPASS,
+    RC,
+    THROTTLE_FS,
+    BATTERY,
+    GPS,
+    LOGGING,
+    FRAME,
+    FLIGHT_MODES,
+]

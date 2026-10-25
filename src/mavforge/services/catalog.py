@@ -69,6 +69,14 @@ DIAGNOSE = OperationSpec(
     False,
 )
 
+SETUP_STATUS = OperationSpec(
+    "setup_status",
+    "ArduPilot's own first-time setup sequence, as a checklist derived from diagnose's "
+    "findings (done / needed / recommended / unknown / not_applicable per step).",
+    Permission.READ,
+    False,
+)
+
 PARAMS_PLAN = OperationSpec(
     "params_plan",
     "Validate requested parameter values and record a reviewable change plan "
@@ -107,6 +115,14 @@ CALIBRATE_ORIENTATION = OperationSpec(
     False,
 )
 
+CALIBRATE_FLIGHT_MODES = OperationSpec(
+    "calibrate_flight_modes",
+    "Guided FLTMODE_CH switch sweep that proposes FLTMODE1..6 as a change plan (writes "
+    "nothing itself; the plan is applied through params_apply after approval).",
+    Permission.READ,
+    False,
+)
+
 _PLANNED: list[OperationSpec] = []
 
 CATALOG: list[OperationSpec] = [
@@ -117,11 +133,13 @@ CATALOG: list[OperationSpec] = [
     PARAMS_BACKUP,
     PARAMS_DIFF,
     DIAGNOSE,
+    SETUP_STATUS,
     PARAMS_PLAN,
     PARAMS_APPLY,
     CALIBRATE,
     CALIBRATE_RADIO,
     CALIBRATE_ORIENTATION,
+    CALIBRATE_FLIGHT_MODES,
     *_PLANNED,
 ]
 
