@@ -49,7 +49,11 @@ guessed). **This is two architecturally different pieces of work, not one featur
     breakpoints, including contiguity across the full PWM range) and fake-vehicle
     integration tests (plan proposed, applied after approval, a requested-but-unreached
     band flagged as a warning not a failure, disabled mode channel, unknown parameter
-    name, nothing requested, MCP refusal). **Not yet** run against SITL or hardware.
+    name, nothing requested, MCP refusal). **SITL** (2026-10-24): a new
+    `test_sitl_flight_modes.py` drives the real mode channel (`FLTMODE_CH=5` on this
+    image) via `RC_CHANNELS_OVERRIDE` — same mechanism as the existing radio SITL test —
+    sweeps three positions, confirms the proposed plan matches and applies cleanly
+    against real ArduCopter 4.7.2 firmware. Not yet run against hardware.
 - **M8b — Failsafe review.** Not a guided workflow — there's no physical action
   involved, so this is a `diagnose` extension (`services/diagnostics.py` /
   `platforms/ardupilot/rules.py`), reading `FS_SHORT_ACTN`, `FS_LONG_ACTN`,
@@ -75,8 +79,11 @@ guessed). **This is two architecturally different pieces of work, not one featur
     Exposed via MCP (the open question above, now answered): `propose_fixes` only ever
     builds a plan, never applies one, so it stays as read-only in effect as `diagnose`
     itself. CLI `--propose-fixes`; API and MCP parameter of the same name. Covered by
-    unit (rules), fake-vehicle integration, CLI and MCP tests — **not yet** run against
-    SITL or hardware, so not yet claimed as fully done by this project's own bar.
+    unit (rules), fake-vehicle integration, CLI and MCP tests. **SITL** (2026-10-24):
+    extended `test_sitl_diagnose.py` — disables `LOG_BACKEND_TYPE` on real ArduCopter
+    4.7.2, confirms `propose_fixes=False` leaves `proposed_plan` unbuilt, then confirms
+    `propose_fixes=True` builds a real plan that applies cleanly and restores the
+    firmware's own default (`LOG_BACKEND_TYPE=1`). Not yet run against hardware.
 
 ### M9: Guided vehicle setup ("wizard")
 Ties M1–M8 together into one guided first-time setup, instead of requiring a person
