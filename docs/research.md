@@ -349,6 +349,19 @@ These are the sources for the ArduPilot rules in `platforms/ardupilot/rules.py`.
 - **Pre-arm reasons.** `MAV_CMD_RUN_PREARM_CHECKS` returns ACCEPTED on SITL and real hardware, then STATUSTEXT `"PreArm: …"`. ArduPilot refuses it while armed.
   - Right after boot, SITL reports transient failures that cleared within about 15 s: `Accels inconsistent`, `EKF attitude is bad`, `AHRS: EKF3 not started`, `Compass 1 not healthy`, `Battery 1 unhealthy`.
   - For this reason MAVForge warns when `SYSTEM_TIME.time_boot_ms` is under 60 s.
+- **Rejected rule: "duplicate serial-port protocol".** `AP_Arming::serial_protocol_checks()`
+  (`libraries/AP_Arming/AP_Arming.cpp`, tag `Plane-4.6.2`) rejects arming when a second
+  `SERIALn_PROTOCOL=23` (RCIN) port exists (`have_serial(SerialProtocol_RCIN, 1)`),
+  unconditionally — `AP_SerialManager::have_serial()`/`find_protocol_instance()` has no
+  exception anywhere in it. But the official
+  [Multiple Radio Control Receivers](https://ardupilot.org/copter/docs/common-multiple-rx.html)
+  page documents configuring a *second* receiver with that exact same value (`SERIALx_PROTOCOL=23`),
+  gated by `RC_OPTIONS` bit 10, on boards with an IOMCU co-processor. Couldn't resolve
+  from the fetched source whether the IOMCU path bypasses the main `AP_SerialManager`
+  (plausible: the IOMCU has its own co-processor and own serial handling) or whether
+  this is a genuine firmware inconsistency. Implementing "two ports = RCIN is a fault"
+  without resolving that risks a false positive on a legitimate, documented setup, so
+  it was left out rather than guessed at.
 - **Rejected rule: "value outside documented range".**
   - On the stock ArduPlane 4.6.2 configuration it flagged 17 parameters. Nearly all were firmware defaults where 0 means "disabled" but falls outside the documented range (e.g. `AIRSPEED_STALL`, `FENCE_TOTAL`), or board-specific pin numbers.
   - That is too noisy for diagnostics. Range validation belongs at write time instead (planned).

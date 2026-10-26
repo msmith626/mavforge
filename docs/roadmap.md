@@ -254,9 +254,16 @@ accordingly, not treated as blockers:
   behavior, so that's what the extended `ardupilot.battery_failsafe` rule checks —
   as a FAULT, since ArduPilot's own arming check genuinely rejects it. See
   `docs/research.md` ("Diagnostics rules").
-- More rules, each sourced from firmware or metadata:
-  - servo and motor output functions;
-  - serial-port protocol conflicts.
+- **Serial-port protocol conflicts: investigated, rejected (2026-10-26).** The one
+  firmware-level check found (`AP_Arming::serial_protocol_checks()`: a second
+  `SERIALn_PROTOCOL=23`/RCIN port fails arming) turned out to collide with an
+  officially-documented feature (a *second* receiver, intentionally configured with
+  that same value, gated by `RC_OPTIONS` bit 10). Couldn't confirm from the source
+  fetched whether that path bypasses the check via the IOMCU or is a genuine firmware
+  inconsistency — implementing the simple version risks a false-positive FAULT on a
+  legitimate setup, so it wasn't built. See `docs/research.md` ("Rejected rule:
+  duplicate serial-port protocol").
+- Servo and motor output functions (still open — not yet investigated).
 - Optional comparison against a saved baseline inside the report.
 
 ### Parameters (2, remaining)
