@@ -208,6 +208,47 @@ def test_battery_no_threshold_names_the_action_and_does_not_propose_a_voltage() 
     assert all(f.proposed_changes is None for f in result)
 
 
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        # Inverted voltage thresholds: ArduPilot's own arming check refuses this.
+        ({"BATT_LOW_VOLT": 13.2, "BATT_CRT_VOLT": 14.0}, FindingKind.FAULT),  # low < crit
+        ({"BATT_LOW_VOLT": 14.0, "BATT_CRT_VOLT": 14.0}, FindingKind.FAULT),  # low == crit
+        ({"BATT_LOW_VOLT": 14.0, "BATT_CRT_VOLT": 13.2}, FindingKind.PASSED),  # correctly ordered
+        # Same check for the _MAH pair.
+        ({"BATT_LOW_MAH": 300, "BATT_CRT_MAH": 500}, FindingKind.FAULT),
+        ({"BATT_LOW_MAH": 500, "BATT_CRT_MAH": 300}, FindingKind.PASSED),
+        # Firmware only compares a pair when *both* sides are set - one-sided is a
+        # different (missing-threshold) problem, already covered above.
+        ({"BATT_LOW_VOLT": 13.2, "BATT_CRT_VOLT": 0}, FindingKind.WARNING),
+    ],
+)
+def test_battery_failsafe_threshold_inversion(
+    params: dict[str, Any], expected: FindingKind
+) -> None:
+    base = {"BATT_MONITOR": 4, "BATT_FS_LOW_ACT": 1, "BATT_FS_CRT_ACT": 2}
+    assert kinds(rules.BATTERY, base | params) == [expected]
+
+
+def test_battery_failsafe_inversion_is_checked_even_with_no_action_configured() -> None:
+    # Firmware's own check doesn't care whether an action is set, only the raw
+    # threshold values - so this fires even where "no action" would otherwise apply.
+    result = run_rule(
+        rules.BATTERY,
+        ident("plane"),
+        ParamView(
+            {
+                "BATT_MONITOR": 4,
+                "BATT_FS_LOW_ACT": 0,
+                "BATT_FS_CRT_ACT": 0,
+                "BATT_LOW_VOLT": 13.0,
+                "BATT_CRT_VOLT": 14.0,
+            }
+        ),
+    )
+    assert [f.kind for f in result] == [FindingKind.FAULT]
+
+
 def test_gps_logging_and_frame() -> None:
     assert kinds(rules.GPS, {"GPS1_TYPE": 0}) == [FindingKind.WARNING]
     assert kinds(rules.GPS, {"GPS_TYPE": 1}) == [FindingKind.PASSED]  # pre-4.6 name

@@ -244,10 +244,19 @@ accordingly, not treated as blockers:
   constant) was deliberately left unimplemented: that constant's exact value wasn't
   found in the fetched source, and this project doesn't encode a diagnose threshold
   it can't verify. See `docs/research.md` ("Diagnostics rules").
+- **Failsafe thresholds against battery capacity: done (2026-10-26), narrower than the
+  original wording.** Found the real firmware check first:
+  `AP_BattMonitor_Backend::arming_checks()` doesn't compare a failsafe threshold
+  against total `BATT_CAPACITY` — it compares the low and critical thresholds
+  *against each other* (`BATT_LOW_VOLT` must exceed `BATT_CRT_VOLT`; same for the
+  `_MAH` pair), and refuses to arm if they're inverted or equal, independent of
+  whether an action is even configured. That's the actual, verifiable firmware
+  behavior, so that's what the extended `ardupilot.battery_failsafe` rule checks —
+  as a FAULT, since ArduPilot's own arming check genuinely rejects it. See
+  `docs/research.md` ("Diagnostics rules").
 - More rules, each sourced from firmware or metadata:
   - servo and motor output functions;
-  - serial-port protocol conflicts;
-  - failsafe thresholds against battery capacity.
+  - serial-port protocol conflicts.
 - Optional comparison against a saved baseline inside the report.
 
 ### Parameters (2, remaining)

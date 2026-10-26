@@ -353,6 +353,29 @@ def _battery_failsafe(identity: VehicleIdentity, p: ParamView) -> list[Finding]:
         "BATT_FS_LOW_ACT": low,
         "BATT_FS_CRT_ACT": crit,
     }
+    # AP_BattMonitor_Backend::arming_checks() refuses to arm whenever both of a pair are
+    # set and the low one isn't strictly above the critical one ("<kind> failsafe critical
+    # >= low") - independent of whether an action is even configured, so this is checked
+    # before (and regardless of) the action-based findings below.
+    for kind, low_name, crit_name in (
+        ("voltage", "BATT_LOW_VOLT", "BATT_CRT_VOLT"),
+        ("capacity", "BATT_LOW_MAH", "BATT_CRT_MAH"),
+    ):
+        low_v, crit_v = p.get(low_name), p.get(crit_name)
+        if low_v and crit_v and not (low_v > crit_v):
+            return [
+                finding(
+                    BATTERY,
+                    FindingKind.FAULT,
+                    f"{low_name} is not above {crit_name}",
+                    f"{low_name}={low_v}, {crit_name}={crit_v}: the critical threshold "
+                    "must trigger before the low one does, not at or after it. "
+                    "ArduPilot's own arming check refuses to arm over exactly this "
+                    f'("{kind} failsafe critical >= low").',
+                    evidence=evidence | {low_name: low_v, crit_name: crit_v},
+                    recommendation=f"Set {low_name} higher than {crit_name}.",
+                )
+            ]
     if low == 0 and crit == 0:
         return [
             finding(
