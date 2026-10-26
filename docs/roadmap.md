@@ -101,7 +101,11 @@ guessed). **This is two architecturally different pieces of work, not one featur
     extended `test_sitl_diagnose.py` — disables `LOG_BACKEND_TYPE` on real ArduCopter
     4.7.2, confirms `propose_fixes=False` leaves `proposed_plan` unbuilt, then confirms
     `propose_fixes=True` builds a real plan that applies cleanly and restores the
-    firmware's own default (`LOG_BACKEND_TYPE=1`). Not yet run against hardware.
+    firmware's own default (`LOG_BACKEND_TYPE=1`). **Hardware** (2026-10-26): the same
+    sequence, by hand, on the ArduPlane 4.6.2 bench board — disabled, confirmed
+    `propose_fixes=False` leaves `proposed_plan` unbuilt and `=True` builds a real plan,
+    applied and verified back to `LOG_BACKEND_TYPE=1`. M8 (both halves) now has fake
+    vehicle, SITL and hardware evidence.
 
 ### M9: Guided vehicle setup ("wizard")
 Ties M1–M8 together into one guided first-time setup, instead of requiring a person
@@ -212,4 +216,5 @@ Bench board: ArduPlane 4.6.2 over USB, unconfigured airframe, indoors (no GPS fi
 | Battery failsafe (`params set`, over WiFi) | passed; `BATT_FS_LOW_ACT`/`BATT_FS_CRT_ACT`/`BATT_LOW_VOLT`/`BATT_CRT_VOLT` set, verified by read-back | 2026-10-24 |
 | `mavforge setup` (M9) | passed; correctly showed orientation/gyro/level `unknown`, everything else `done`, over USB | 2026-10-25 |
 | Flight mode assignment (Spektrum DX7s) | passed, after finding and fixing a real misconfiguration: `FLTMODE_CH=8` pointed at a dead channel (confirmed with a live RC monitor and a `calibrate radio` sweep — RC8 never moved). Corrected to the real 3-position switch (RC6); RTL/FBWA/MANUAL all confirmed reachable. Also fixed a CLI bug found in the process: live sweep progress was never rendered for this check (worked internally, displayed nothing) | 2026-10-26 |
+| `diagnose --propose-fixes` (M8b) | passed; disabled `LOG_BACKEND_TYPE`, confirmed the plan builds only with the flag, applied and verified back to its original value | 2026-10-26 |
 | 6-position accelerometer calibration | not yet run | |
