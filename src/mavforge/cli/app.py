@@ -872,6 +872,12 @@ def _progress_line(st: CalibrationStatus) -> tuple[object, str]:
         return tuple(c.moved for c in st.rc_channels), (
             f"moved: {' '.join(moved) or '-'}   not yet: {' '.join(waiting) or '-'}"
         )
+    if st.mode_bands:
+        reached = [f"{b.parameter} ({b.pwm_seen})" for b in st.mode_bands if b.visited]
+        waiting = [b.parameter for b in st.mode_bands if not b.visited]
+        return tuple(b.visited for b in st.mode_bands), (
+            f"reached: {' '.join(reached) or '-'}   not yet: {' '.join(waiting) or '-'}"
+        )
     key = tuple((c.compass_id, c.status, (c.completion_pct or 0) // 10) for c in st.compasses)
     text = "  ".join(
         f"compass {c.compass_id}: "

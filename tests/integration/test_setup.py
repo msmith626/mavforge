@@ -39,15 +39,18 @@ def _call_mcp(connection: str, tool: str) -> Any:
         provider.close()
 
 
+UNVERIFIABLE_FROM_PARAMS = ("orientation", "gyro", "level", "ardupilot.flight_modes")
+"""Always unknown, even on a fully configured vehicle: see services/setup.py."""
+
+
 def test_fully_configured_vehicle_is_done_except_what_cant_be_known(fake: FakeVehicle) -> None:
     with mavforge.connect(fake.connection_string) as vehicle:
         report = vehicle.setup_status()
     by_step = {s.step: s.status for s in report.steps}
-    assert by_step["orientation"] is SetupStepStatus.UNKNOWN
-    assert by_step["gyro"] is SetupStepStatus.UNKNOWN
-    assert by_step["level"] is SetupStepStatus.UNKNOWN
+    for step in UNVERIFIABLE_FROM_PARAMS:
+        assert by_step[step] is SetupStepStatus.UNKNOWN, step
     for step, status in by_step.items():
-        if step not in ("orientation", "gyro", "level"):
+        if step not in UNVERIFIABLE_FROM_PARAMS:
             assert status is SetupStepStatus.DONE, step
     assert report.next_step is not None
     assert report.next_step.step == "orientation"  # first in sequence order
@@ -107,4 +110,17 @@ def test_fltmode_ch_disabled_is_suspected_not_done(make_fake: FakeFactory) -> No
         report = vehicle.setup_status()
     step = next(s for s in report.steps if s.step == "ardupilot.flight_modes")
     assert step.status is SetupStepStatus.RECOMMENDED
+    assert step.run == "mavforge calibrate flight-modes FLTMODEn=VALUE ..."
+
+
+def test_fltmode_ch_enabled_is_unknown_not_done(fake: FakeVehicle) -> None:
+    # Found on real hardware (2026-10-26): a non-zero FLTMODE_CH doesn't mean the
+    # channel carries a real signal. The default fixture's FLTMODE_CH=5 is non-zero,
+    # so this must stay unknown rather than a false 'done'.
+    with mavforge.connect(fake.connection_string) as vehicle:
+        report = vehicle.setup_status()
+    step = next(s for s in report.steps if s.step == "ardupilot.flight_modes")
+    assert step.status is SetupStepStatus.UNKNOWN
+    assert step.finding is not None
+    assert step.finding.kind.value == "passed"  # the underlying diagnose finding
     assert step.run == "mavforge calibrate flight-modes FLTMODEn=VALUE ..."

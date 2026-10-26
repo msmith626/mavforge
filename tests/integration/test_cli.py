@@ -445,6 +445,9 @@ def test_calibrate_flight_modes_cli_sweeps_then_applies_after_approval(
     )
     person.join(5)
     assert result.exit_code == ExitCode.OK, result.output
+    # Live progress during the sweep, not just the final evidence line (a real bug this
+    # session: the renderer only knew about rc_channels/tilt, never mode_bands).
+    assert "reached: FLTMODE1 (1100) FLTMODE3 (1425) FLTMODE6 (2000)" in result.stderr
     assert "band reached" in result.stderr
     assert "Write 1 parameter(s)" in result.stderr  # FLTMODE1 unchanged, FLTMODE3 changes
     assert fake.config.params["FLTMODE3"][0] == 5

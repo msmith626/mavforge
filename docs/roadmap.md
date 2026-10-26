@@ -53,7 +53,28 @@ guessed). **This is two architecturally different pieces of work, not one featur
     `test_sitl_flight_modes.py` drives the real mode channel (`FLTMODE_CH=5` on this
     image) via `RC_CHANNELS_OVERRIDE` — same mechanism as the existing radio SITL test —
     sweeps three positions, confirms the proposed plan matches and applies cleanly
-    against real ArduCopter 4.7.2 firmware. Not yet run against hardware.
+    against real ArduCopter 4.7.2 firmware. **Hardware** (2026-10-26): run on the
+    ArduPlane 4.6.2 bench board. Found two real things, not simulated ones:
+    - A genuine CLI bug — the live-progress renderer only knew about `rc_channels`
+      (radio) and `tilt` (orientation); `mode_bands` was tracked internally the whole
+      time but never displayed. Fixed, and confirmed live on hardware afterward (the
+      "reached: ..." line updating three times as the switch was flipped).
+    - A real misconfiguration on the vehicle itself: `FLTMODE_CH` was `8`, a channel
+      its Spektrum DX7s doesn't drive at all (confirmed separately with a live RC
+      monitor and a full `calibrate radio` sweep — RC8 never moved). The flight-mode
+      switch did nothing. The actual 3-position switch was on RC6 the whole time;
+      `FLTMODE1/4/6` (RTL/FBWA/MANUAL) all confirmed reachable once `FLTMODE_CH` was
+      corrected to `6`.
+    - **A real gap this exposed in `ardupilot.flight_modes` (M9's rule, not M8a's):**
+      `mavforge setup` reported this step `done` the entire time `FLTMODE_CH=8` was
+      pointing at a dead channel. The rule only checks `FLTMODE_CH != 0`, which cannot
+      tell "a channel number is set" apart from "that channel actually carries a
+      signal" — the exact distinction that mattered here. Unlike orientation/gyro/level
+      (never claimed `done`, by design), this one gave a confident wrong answer. Worth
+      fixing: either downgrade this step to `unknown` whenever `FLTMODE_CH != 0`
+      (parameters alone can't confirm reachability, only a live sweep can — see
+      `calibrate flight-modes`), or have `setup_status` check for RC_RECEIVER health /
+      recent RC activity before calling it `done`. Not fixed yet.
 - **M8b — Failsafe review.** Not a guided workflow — there's no physical action
   involved, so this is a `diagnose` extension (`services/diagnostics.py` /
   `platforms/ardupilot/rules.py`), reading `FS_SHORT_ACTN`, `FS_LONG_ACTN`,
@@ -188,4 +209,7 @@ Bench board: ArduPlane 4.6.2 over USB, unconfigured airframe, indoors (no GPS fi
 | Radio calibration (Spektrum DX7s, 7 channels) | passed; matched the existing calibration within 2 µs | 2026-10-23 |
 | Board orientation check | passed; `AHRS_ORIENTATION=0` matches, confirmed by hand | 2026-10-23 |
 | Wireless link (WiFi, onboard module) | passed; `info`, `status`, full 1117-param download, no gaps. Bluetooth (BLE and classic SPP) ruled out — see [docs/wireless.md](wireless.md) | 2026-10-23 |
+| Battery failsafe (`params set`, over WiFi) | passed; `BATT_FS_LOW_ACT`/`BATT_FS_CRT_ACT`/`BATT_LOW_VOLT`/`BATT_CRT_VOLT` set, verified by read-back | 2026-10-24 |
+| `mavforge setup` (M9) | passed; correctly showed orientation/gyro/level `unknown`, everything else `done`, over USB | 2026-10-25 |
+| Flight mode assignment (Spektrum DX7s) | passed, after finding and fixing a real misconfiguration: `FLTMODE_CH=8` pointed at a dead channel (confirmed with a live RC monitor and a `calibrate radio` sweep — RC8 never moved). Corrected to the real 3-position switch (RC6); RTL/FBWA/MANUAL all confirmed reachable. Also fixed a CLI bug found in the process: live sweep progress was never rendered for this check (worked internally, displayed nothing) | 2026-10-26 |
 | 6-position accelerometer calibration | not yet run | |

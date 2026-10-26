@@ -80,6 +80,23 @@ def test_finding_kinds_map_to_the_right_status() -> None:
     assert statuses["ardupilot.gps_configured"] is SetupStepStatus.UNKNOWN
 
 
+def test_flight_modes_passed_is_unknown_not_done() -> None:
+    # Found on real hardware (2026-10-26): a non-zero FLTMODE_CH (-> PASSED from the
+    # rule) doesn't mean the channel carries a real signal, unlike every other PASSED
+    # finding. The SUSPECTED case (disabled) is unaffected and stays RECOMMENDED.
+    statuses = by_step(
+        [
+            finding("ardupilot.flight_modes", FindingKind.PASSED),
+            finding("ardupilot.accel_cal", FindingKind.PASSED),
+        ]
+    )
+    assert statuses["ardupilot.flight_modes"] is SetupStepStatus.UNKNOWN
+    assert statuses["ardupilot.accel_cal"] is SetupStepStatus.DONE  # unaffected
+
+    suspected = by_step([finding("ardupilot.flight_modes", FindingKind.SUSPECTED)])
+    assert suspected["ardupilot.flight_modes"] is SetupStepStatus.RECOMMENDED
+
+
 def test_done_steps_carry_no_run_command() -> None:
     steps = _steps_from_report(report([finding("ardupilot.accel_cal", FindingKind.PASSED)]))
     accel = next(s for s in steps if s.step == "ardupilot.accel_cal")

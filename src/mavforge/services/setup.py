@@ -13,6 +13,16 @@ parameters alone and are reported ``unknown`` rather than guessed:
 - A true "was this verified for this exact vehicle, and is it still valid" signal
   needs the audit log's read side, which doesn't exist yet (``AuditLog`` only appends
   today). This reads only live parameters; audit-backed verification is future work.
+- Flight-mode assignment: found the hard way, on real hardware, 2026-10-26.
+  ``ardupilot.flight_modes`` reports PASSED whenever ``FLTMODE_CH`` is non-zero, but
+  "a channel number is set" does not mean "that channel carries a real signal" -- a
+  vehicle's ``FLTMODE_CH`` pointed at a channel its transmitter never drove at all,
+  and this reported ``done`` the whole time. ``RC_RECEIVER`` health doesn't catch this
+  either: it reflects the receiver's link framing valid data, not whether any specific
+  channel number varies. Only the live sweep (``calibrate flight-modes``) can confirm
+  reachability, so a PASSED finding here is downgraded to ``unknown`` below, the same
+  as orientation/gyro/level -- but a SUSPECTED finding (``FLTMODE_CH=0``, confidently
+  never configured) stays as a real, reliable signal.
 """
 
 from __future__ import annotations
@@ -58,6 +68,12 @@ _STEPS: tuple[tuple[str, str, str | None], ...] = (
 # docstring. Always reported unknown, regardless of what diagnose found.
 _NO_RULE = {"orientation", "gyro", "level"}
 
+# ardupilot.flight_modes has a real rule, but a PASSED result from it only means
+# "FLTMODE_CH is non-zero" -- not that the channel actually carries a signal. See the
+# module docstring (2026-10-26). The SUSPECTED case (FLTMODE_CH=0) stays reliable and
+# is not affected.
+_PASSED_MEANS_UNKNOWN = {"ardupilot.flight_modes"}
+
 _STATUS_FOR_KIND = {
     FindingKind.FAULT: SetupStepStatus.NEEDED,
     FindingKind.WARNING: SetupStepStatus.RECOMMENDED,
@@ -72,6 +88,16 @@ _RELEVANT_STATUSES = frozenset(
 
 
 def _step_from_finding(step: str, title: str, run: str | None, finding: Finding) -> SetupStep:
+    if finding.kind is FindingKind.PASSED and step in _PASSED_MEANS_UNKNOWN:
+        return SetupStep(
+            step=step,
+            title=title,
+            status=SetupStepStatus.UNKNOWN,
+            detail="A channel is configured, but that alone doesn't confirm it carries "
+            "a real signal; only the live sweep does.",
+            run=run,
+            finding=finding,
+        )
     status = _STATUS_FOR_KIND.get(finding.kind, SetupStepStatus.UNKNOWN)
     return SetupStep(
         step=step,
