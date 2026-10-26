@@ -58,6 +58,7 @@ def test_decodes_simple_entries() -> None:
         ("FRAME_CLASS", 1, ParamType.INT8),
         ("FRAME_TYPE", 0, ParamType.INT8),
     ]
+    assert result.defaults == {}  # plain param.pck: no entry ever carries a default
     assert [p.index for p in result.params] == [0, 1]
 
 
@@ -99,10 +100,9 @@ def test_padding_bytes_between_entries_are_skipped() -> None:
     assert [p.name for p in result.params] == ["A", "B"]
 
 
-def test_defaults_are_consumed_but_not_exposed() -> None:
-    # withdefaults=1: a default value follows each flagged entry. This module only
-    # downloads live values (see module docstring) - it must skip past the default
-    # bytes correctly (not just the live value's bytes), or the next entry misparses.
+def test_flagged_entries_expose_their_default() -> None:
+    # withdefaults=1: a default value follows each flagged entry. Must also skip past
+    # the default bytes correctly for *unflagged* entries after it, or they misparse.
     data = _pck(
         2,
         2,
@@ -112,6 +112,19 @@ def test_defaults_are_consumed_but_not_exposed() -> None:
     )
     result = param_pack.decode(data)
     assert [(p.name, p.value) for p in result.params] == [("A", 5), ("B", 9)]
+    assert result.defaults == {"A": 0}  # B carried no default: it already equals it
+
+
+def test_default_decoding_follows_the_entry_s_own_type() -> None:
+    data = _pck(
+        2,
+        2,
+        _entry(ParamType.REAL32, "ARSPD_FBW_MIN", 18.5, default=16.0),
+        _entry(ParamType.INT32, "BATT_CAPACITY", 4000, default=3300),
+        with_defaults=True,
+    )
+    result = param_pack.decode(data)
+    assert result.defaults == {"ARSPD_FBW_MIN": 16.0, "BATT_CAPACITY": 3300}
 
 
 def test_rejects_unknown_magic() -> None:

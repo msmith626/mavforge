@@ -60,6 +60,12 @@ PARAMS_DIFF = OperationSpec(
     Permission.READ,
     False,
 )
+PARAMS_DIFF_DEFAULTS = OperationSpec(
+    "params_diff_defaults",
+    "Compare the vehicle's parameters with the firmware's own shipped defaults.",
+    Permission.READ,
+    False,
+)
 
 DIAGNOSE = OperationSpec(
     "diagnose",
@@ -132,6 +138,7 @@ CATALOG: list[OperationSpec] = [
     PARAMS_GET,
     PARAMS_BACKUP,
     PARAMS_DIFF,
+    PARAMS_DIFF_DEFAULTS,
     DIAGNOSE,
     SETUP_STATUS,
     PARAMS_PLAN,

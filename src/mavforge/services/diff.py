@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from mavforge.domain.errors import UnsupportedError
 from mavforge.domain.models import (
     BackupParam,
     ParamBackup,
@@ -23,8 +24,9 @@ from mavforge.domain.values import values_equal
 from mavforge.platforms.ardupilot.adapter import ArduPilotAdapter
 from mavforge.platforms.base import PlatformAdapter
 from mavforge.platforms.generic import GenericAdapter
+from mavforge.protocol import ftp, param_pack
 from mavforge.services.backup import build_backup, describe_vehicle, load_backup
-from mavforge.services.catalog import PARAMS_DIFF, run_operation
+from mavforge.services.catalog import PARAMS_DIFF, PARAMS_DIFF_DEFAULTS, run_operation
 from mavforge.services.session import Session
 
 
@@ -144,6 +146,59 @@ def diff_vehicle(session: Session, reference_path: Path) -> ParamDiffResult:
         )
 
     return run_operation(session, PARAMS_DIFF, run, reference=reference_path.name)
+
+
+def diff_against_defaults(session: Session) -> ParamDiffResult:
+    """Compare the live vehicle against the firmware's own shipped defaults.
+
+    Needs MAVFTP: there is no PARAM_REQUEST_LIST equivalent of "what is this
+    parameter's default", so this raises ``UnsupportedError`` rather than falling
+    back, unlike ``fetch_all_params()``'s silent fallback for the plain download.
+
+    One request answers the whole comparison: ``@PARAM/param.pck?withdefaults=1``
+    carries every current value, and - per ArduPilot's own encoder
+    (``AP_Filesystem_Param.cpp::pack_param()``) - a default only for entries where it
+    differs from the current value. A name absent from that set already equals its
+    default; nothing further needs fetching or comparing.
+    """
+
+    def run() -> ParamDiffResult:
+        if "FTP" not in session.identity.protocol_capabilities:
+            raise UnsupportedError(
+                "This vehicle does not report MAVFTP support, which this comparison "
+                "needs (there is no PARAM_REQUEST_LIST equivalent of 'what is the "
+                "default for this parameter')."
+            )
+        data = ftp.fetch_file(
+            session.connection, *session.target, b"@PARAM/param.pck?withdefaults=1"
+        )
+        pack = param_pack.decode(data)
+        values = {p.name: p for p in pack.params}
+        is_volatile = session.adapter.is_volatile_param
+        changed = [
+            ParamChange(
+                name=name,
+                reference=default,
+                current=values[name].value,
+                type=values[name].type,
+                volatile=is_volatile(name),
+            )
+            for name, default in pack.defaults.items()
+        ]
+        changed.sort(key=lambda c: c.name)
+        return ParamDiffResult(
+            status=OperationStatus.SUCCEEDED,
+            reference="firmware defaults",
+            current="vehicle",
+            vehicle=session.identity,
+            changed=changed,
+            only_in_reference=[],
+            only_in_current=[],
+            unchanged=len(pack.params) - len(changed),
+            warnings=[],
+        )
+
+    return run_operation(session, PARAMS_DIFF_DEFAULTS, run)
 
 
 def diff_files(reference_path: Path, current_path: Path) -> ParamDiffResult:

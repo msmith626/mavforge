@@ -24,6 +24,7 @@ TOOLS = {
     "params_backup",
     "params_backups",
     "params_diff",
+    "params_diff_defaults",
     "diagnose",
     "setup_status",
     "calibration_procedures",
@@ -168,6 +169,21 @@ def test_agents_cannot_diff_arbitrary_paths(fake: FakeVehicle, backup_id: str) -
     assert result.is_error
     assert "invalid_input" in result.content[0].text
     assert "PARAM_REQUEST_LIST" not in fake.received_types()
+
+
+def test_diff_defaults_tool(make_fake: FakeFactory) -> None:
+    fake = make_fake(firmware_defaults={"BATT_CAPACITY": 3400})  # live value is 3300
+    result = call(fake.connection_string, "params_diff_defaults")
+    assert not result.is_error
+    assert result.structured_content["reference"] == "firmware defaults"
+    assert [c["name"] for c in result.structured_content["changed"]] == ["BATT_CAPACITY"]
+
+
+def test_diff_defaults_tool_without_ftp_is_unsupported(make_fake: FakeFactory) -> None:
+    fake = make_fake(ftp_enabled=False)
+    result = call(fake.connection_string, "params_diff_defaults")
+    assert result.is_error
+    assert "unsupported" in result.content[0].text
 
 
 def test_diagnose_tool(make_fake: FakeFactory) -> None:

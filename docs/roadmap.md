@@ -286,7 +286,7 @@ accordingly, not treated as blockers:
   result), CLI, and MCP (including the path-traversal-refusal test, mirrored from
   `params_diff`'s existing one) layers.
 
-### Parameters (1, remaining)
+### Parameters (0, remaining)
 - **MAVFTP `@PARAM/param.pck` bulk download: done (2026-10-26).** New
   `protocol/ftp.py` (sequential OpenFileRO/ReadFile/TerminateSession client) and
   `protocol/param_pack.py` (pure decoder for the packed format). Wired into
@@ -320,7 +320,40 @@ accordingly, not treated as blockers:
   fault-injection knobs that have no MAVFTP equivalent; pinned to
   `ftp_enabled=False` rather than taught to the fake FTP server, since an incomplete
   FTP transfer isn't "partial data," it's an exception that triggers the fallback.
-- Diff against firmware defaults (`param.pck?withdefaults=1`).
+- **Diff against firmware defaults: done (2026-10-26).** Checked
+  `AP_Filesystem_Param.cpp::pack_param()` directly (not just the wiki, after the
+  seq_number mismatch above showed the wiki isn't always reliable here): ArduPilot
+  only attaches a default to an entry when it was requested *and* the live value
+  differs from it. So one `param.pck?withdefaults=1` download answers the whole
+  comparison on its own - every name in the response's decoded `defaults` map is a
+  changed parameter with its default right there; every absent name already equals
+  its (unmodeled) default. No second request needed.
+
+  MAVFTP-only, with no fallback: there's no `PARAM_REQUEST_LIST` equivalent of "what
+  is this parameter's default", so `services/diff.py::diff_against_defaults()`
+  raises `UnsupportedError` when the vehicle doesn't report FTP support, rather than
+  silently doing something else. New API `vehicle.params.diff_defaults()`, CLI
+  `mavforge params diff-defaults`, MCP `params_diff_defaults` (all reuse
+  `ParamDiffResult`/the existing diff renderer - this is the same shape as `params
+  diff`, just against the firmware instead of a saved file).
+
+  `protocol/param_pack.py`'s decoder extended to capture `defaults: dict[str,
+  float|int]` (previously deliberately skipped, see M-earlier-this-session's writeup
+  above); the fake vehicle's `.pck` encoder and FTP handler extended to model
+  `?withdefaults=1` and a configurable `firmware_defaults` knob, matching the real
+  "only attach when it differs" semantics exactly.
+
+  Tested at all four layers again: the decoder against hand-built bytes (3 more unit
+  tests), the fake vehicle (5 integration tests: found, unchanged, "listed but equal
+  behaves like absent," volatile marking, unsupported-without-FTP), real ArduCopter
+  4.7.2 SITL (42 of 1369 parameters differ from stock - sensor device IDs, baro
+  calibration, compass priorities, all deliberately set by SITL's own
+  `default_params/copter.parm`), and real ArduPlane 4.6.2 hardware (76 of 1117
+  differ, cross-checked against a plain backup's live values - exact match -
+  including `FLTMODE_CH`: default `8`, current `6`, the exact fix made earlier on
+  this same vehicle, now correctly shown as a deliberate change rather than an
+  oversight). See `docs/research.md` ("MAVFTP bulk parameter download") for the full
+  writeup.
 
 ### Calibration (4, remaining)
 - 6-position accelerometer calibration on hardware. It passes in SITL but hasn't been
@@ -347,4 +380,5 @@ Bench board: ArduPlane 4.6.2 over USB, unconfigured airframe, indoors (no GPS fi
 | Flight mode assignment (Spektrum DX7s) | passed, after finding and fixing a real misconfiguration: `FLTMODE_CH=8` pointed at a dead channel (confirmed with a live RC monitor and a `calibrate radio` sweep — RC8 never moved). Corrected to the real 3-position switch (RC6); RTL/FBWA/MANUAL all confirmed reachable. Also fixed a CLI bug found in the process: live sweep progress was never rendered for this check (worked internally, displayed nothing) | 2026-10-26 |
 | `diagnose --propose-fixes` (M8b) | passed; disabled `LOG_BACKEND_TYPE`, confirmed the plan builds only with the flag, applied and verified back to its original value | 2026-10-26 |
 | MAVFTP bulk param download | passed; 1117 params, exact match against `PARAM_REQUEST_LIST` (only `STAT_RUNTIME` differed, a known-volatile counter); **1.11s via FTP vs 16.28s via `PARAM_REQUEST_LIST`** on this real USB-serial link, about 15x; `backup()` confirmed to use FTP, not fall back | 2026-10-26 |
+| Diff against firmware defaults | passed; 76 of 1117 params differ from stock, cross-checked against a plain backup's live values (exact match); correctly surfaced `FLTMODE_CH` (default 8, current 6) as a deliberate change - the exact fix made earlier on this same vehicle | 2026-10-26 |
 | 6-position accelerometer calibration | not yet run | |

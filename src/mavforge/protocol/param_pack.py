@@ -10,7 +10,7 @@ integer entries here are stored as genuine binary ints, so there is no
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from mavforge.domain.errors import ProtocolError
 from mavforge.domain.models import ParamType, ParamValue
@@ -34,6 +34,11 @@ class ParamPack:
     total_params: int
     """The component's total parameter count, from the file header."""
     params: list[ParamValue]
+    defaults: dict[str, float | int] = field(default_factory=dict)
+    """Only present for entries ArduPilot flagged as carrying one - which (per
+    AP_Filesystem_Param.cpp's pack_param()) only happens when the live value differs
+    from the default. A name absent here either has no default recorded (a plain
+    param.pck) or already equals its default (a param.pck?withdefaults=1)."""
 
 
 def decode(data: bytes) -> ParamPack:
@@ -46,6 +51,7 @@ def decode(data: bytes) -> ParamPack:
     if magic not in (_MAGIC_NO_DEFAULTS, _MAGIC_WITH_DEFAULTS):
         raise ProtocolError(f"param.pck has an unrecognised magic 0x{magic:04x}")
     params: list[ParamValue] = []
+    defaults: dict[str, float | int] = {}
     offset = 6
     name = ""
     while len(params) < num_params:
@@ -86,5 +92,8 @@ def decode(data: bytes) -> ParamPack:
         params.append(
             ParamValue(name=name, value=normalize(float(raw), ptype), type=ptype, index=len(params))
         )
+        if flags & 1:
+            (default_raw,) = struct.unpack_from(fmt, data, value_end)
+            defaults[name] = normalize(float(default_raw), ptype)
         offset = end
-    return ParamPack(total_params=total_params, params=params)
+    return ParamPack(total_params=total_params, params=params, defaults=defaults)

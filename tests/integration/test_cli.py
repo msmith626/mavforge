@@ -130,6 +130,21 @@ def test_offline_diff_needs_no_connection(fake: FakeVehicle, tmp_path: Path) -> 
     assert [c["name"] for c in data["changed"]] == ["FRAME_CLASS"]
 
 
+def test_diff_defaults(make_fake: FakeFactory) -> None:
+    fake = make_fake(firmware_defaults={"BATT_CAPACITY": 3400})  # live value is 3300
+    code, stdout, _ = invoke("-c", fake.connection_string, "params", "diff-defaults")
+    assert code == ExitCode.OK
+    assert "firmware defaults" in stdout
+    assert "BATT_CAPACITY" in stdout
+
+
+def test_diff_defaults_without_ftp_is_unsupported(make_fake: FakeFactory) -> None:
+    fake = make_fake(ftp_enabled=False)
+    code, _, stderr = invoke("-c", fake.connection_string, "params", "diff-defaults")
+    assert code == ExitCode.UNSUPPORTED
+    assert "MAVFTP" in stderr
+
+
 def test_backups_list_and_bad_reference(fake: FakeVehicle) -> None:
     invoke("-c", fake.connection_string, "params", "backup")
     code, stdout, _ = invoke("--json", "params", "backups")

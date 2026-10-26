@@ -134,6 +134,12 @@ class Params:
         """Compare the vehicle with a backup (path or backup id) or a ``.param`` file."""
         return diff_service.diff_vehicle(self._session, backup_service.resolve_reference(reference))
 
+    def diff_defaults(self) -> ParamDiffResult:
+        """Compare the vehicle with the firmware's own shipped defaults - what's been
+        changed from stock. Needs MAVFTP (raises ``UnsupportedError`` otherwise): there
+        is no PARAM_REQUEST_LIST equivalent of "what is this parameter's default"."""
+        return diff_service.diff_against_defaults(self._session)
+
 
 class Calibration:
     """Calibration workflows. Each run that changes the vehicle needs an approved request

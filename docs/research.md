@@ -425,6 +425,30 @@ These are the sources for the ArduPilot rules in `platforms/ardupilot/rules.py`.
 - **Writes deliberately excluded.** `write_param()`'s PARAM_SET-with-read-back
   verification is core to this project's safety model; MAVFTP's `WriteFile` path has
   no equivalent per-parameter verification, so it was not built.
+- **Diff against firmware defaults (`param.pck?withdefaults=1`).** Verified directly
+  from `AP_Filesystem_Param.cpp::pack_param()` (tag `Copter-4.7.2`), not just the
+  wiki, after the seq_number mismatch above made clear the wiki alone isn't always
+  reliable for this protocol: `const bool add_default = r.with_defaults &&
+  !is_equal(ap->cast_to_float(ptype), default_val);` - a default is attached to an
+  entry *only* when it was requested *and* the live value differs from the default.
+  This means one `param.pck?withdefaults=1` download answers the whole comparison by
+  itself: every name present in the response's `defaults` map is, by construction, a
+  changed parameter with its default value right there; every name absent already
+  equals its (otherwise unmodeled) default. No second request, no client-side
+  "fetch live value separately and compare" needed.
+  MAVFTP-only: there is no `PARAM_REQUEST_LIST` equivalent of "what is this
+  parameter's default", so `diff_against_defaults()` raises `UnsupportedError` rather
+  than falling back, unlike the plain bulk download.
+  - **ArduCopter 4.7.2 SITL:** 42 of 1369 parameters differ from stock - device IDs
+    assigned to detected sensors, baro ground-pressure calibration (correctly
+    `volatile`), compass priorities, and other things `Tools/autotest/default_params/
+    copter.parm` deliberately sets for simulation. [verified]
+  - **ArduPlane 4.6.2 hardware (USB serial):** 76 of 1117 differ, cross-checked
+    against a plain `params backup`'s live values (exact match). Includes
+    `FLTMODE_CH`: default `8`, current `6` - the exact fix made earlier in this
+    project's history (`docs/roadmap.md`, M8/M9 hardware evidence), now correctly
+    shown as a deliberate departure from firmware stock rather than an oversight.
+    [verified]
 
 ## Parameter writes
 

@@ -386,6 +386,15 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
             return _offline(lambda: mavforge.diff_backups(baseline, other))
         return _call(provider, lambda v: v.params.diff(baseline))
 
+    @server.tool(annotations=READ_ONLY)
+    def params_diff_defaults() -> ParamDiffResult:
+        """Compare the vehicle's parameters with the firmware's own shipped defaults -
+        what's been changed from stock. Read-only. Needs MAVFTP support; fails with
+        `unsupported` if the vehicle doesn't report it (there is no
+        PARAM_REQUEST_LIST equivalent of 'what is this parameter's default'). Changes
+        marked `volatile` are normally not configuration differences."""
+        return _call(provider, lambda v: v.params.diff_defaults())
+
     return server
 
 

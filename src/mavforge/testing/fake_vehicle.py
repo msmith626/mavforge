@@ -152,6 +152,10 @@ class FakeVehicleConfig:
     ftp_param_pck_fails: bool = False
     """FTP is otherwise enabled, but OpenFileRO(@PARAM/param.pck) is NAKed (Fail) -
     models a server that claims the capability but can't actually serve that file."""
+    firmware_defaults: dict[str, float] = field(default_factory=dict)
+    """For param.pck?withdefaults=1 only: a name's shipped default, when it differs
+    from its current value in ``params``. A name not listed here is modelled as
+    already equal to its (unmodeled) default, same as real firmware."""
     calibration: FakeCalibrationConfig = field(default_factory=FakeCalibrationConfig)
     uptime_s: float = 600.0
     """Seconds since 'boot' reported in SYSTEM_TIME when the fake starts."""
@@ -586,13 +590,20 @@ class FakeVehicle:
             reply(ftp.OP_NAK, session=session, data=bytes([error]))
 
         if frame.opcode == ftp.OP_OPEN_FILE_RO:
-            if frame.data.rstrip(b"\x00") != b"@PARAM/param.pck":
+            path = frame.data.rstrip(b"\x00")
+            if path == b"@PARAM/param.pck":
+                with_defaults = False
+            elif path == b"@PARAM/param.pck?withdefaults=1":
+                with_defaults = True
+            else:
                 nak(ftp.NAK_FILE_NOT_FOUND)
                 return
             if cfg.ftp_param_pck_fails:
                 nak(ftp.NAK_FAIL)
                 return
-            data = _encode_param_pack(self._param_snapshot())
+            data = _encode_param_pack(
+                self._param_snapshot(), cfg.firmware_defaults if with_defaults else None
+            )
             with self._lock:
                 self._ftp_session = (1, data)
             reply(ftp.OP_ACK, session=1, data=struct.pack("<I", len(data)))
@@ -624,17 +635,31 @@ _PCK_TYPE_CODES: dict[ParamType, tuple[int, str]] = {
 }
 
 
-def _encode_param_pack(params: list[tuple[str, ParamSpec]]) -> bytes:
+def _encode_param_pack(
+    params: list[tuple[str, ParamSpec]], defaults: dict[str, float] | None
+) -> bytes:
     """Build an uncompressed param.pck from the fake vehicle's current parameters, for
     FTP download tests. Real servers compress repeated name prefixes; this doesn't
     need to, since the decoder's compression handling is already covered independently
-    (tests/unit/test_param_pack.py, built from hand-written bytes)."""
+    (tests/unit/test_param_pack.py, built from hand-written bytes).
+
+    ``defaults``: None for a plain param.pck. Otherwise, a param.pck?withdefaults=1 -
+    magic 0x671C, and (matching real ArduPilot's AP_Filesystem_Param.cpp::pack_param())
+    a default is attached only for a name present in ``defaults`` whose value there
+    differs from the current one; everything else is assumed to already equal its
+    (unmodeled) default, exactly as real firmware would for an unlisted parameter."""
     body = bytearray()
     for name, (value, ptype) in params:
         code, fmt = _PCK_TYPE_CODES[ptype]
-        body += bytes([code, (len(name) - 1) << 4])  # flags=0 (no default), common_len=0
+        has_default = defaults is not None and defaults.get(name, value) != value
+        body += bytes([code | (has_default << 4), (len(name) - 1) << 4])  # common_len=0
         body += name.encode("ascii") + struct.pack(fmt, round(value) if ptype.is_integer else value)
-    header = struct.pack("<HHH", 0x671B, len(params), len(params))
+        if has_default:
+            assert defaults is not None
+            default_value = defaults[name]
+            body += struct.pack(fmt, round(default_value) if ptype.is_integer else default_value)
+    magic = 0x671C if defaults is not None else 0x671B
+    header = struct.pack("<HHH", magic, len(params), len(params))
     return header + bytes(body)
 
 

@@ -26,6 +26,7 @@ def test_read_operations_send_only_requests(fake: FakeVehicle) -> None:
         vehicle.params.list()
         vehicle.params.get("FRAME_CLASS")
         vehicle.params.backup()
+        vehicle.params.diff_defaults()
         vehicle.diagnose(prearm_wait=0.5)
     assert fake.received_types() <= READ_ONLY_MESSAGES
     commands = {

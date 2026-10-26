@@ -811,6 +811,17 @@ def params_diff(
     _with_vehicle(ctx, lambda v: v.params.diff(baseline), render)
 
 
+@params_app.command("diff-defaults")
+def params_diff_defaults(
+    ctx: typer.Context,
+    include_volatile: Annotated[
+        bool, typer.Option("--all", "-a", help="Also show volatile parameter changes.")
+    ] = False,
+) -> None:
+    """Compare the vehicle with the firmware's own shipped defaults. Needs MAVFTP."""
+    _with_vehicle(ctx, lambda v: v.params.diff_defaults(), make_render_diff(include_volatile))
+
+
 _WRITE_POLICY = Policy.configure(allow_real_vehicle=True)
 """CLI write commands act for the human at the terminal, who reviews and confirms every
 plan (marked REAL VEHICLE when applicable) before anything is written."""
