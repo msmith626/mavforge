@@ -304,7 +304,9 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
         return _call(provider, lambda v: v.params.get(name))
 
     @server.tool(annotations=READ_ONLY)
-    def diagnose(propose_fixes: bool = False) -> DiagnosticReport:
+    def diagnose(
+        propose_fixes: bool = False, baseline_backup_id: str | None = None
+    ) -> DiagnosticReport:
         """Diagnose configuration and readiness problems. Read-only: gathers sensor
         health, asks the firmware to run (not change) its pre-arm checks, downloads all
         parameters and applies platform rules. Each finding has a `kind`:
@@ -317,8 +319,11 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
         nothing and stays read-only in effect: approving a plan is still never possible
         here, and MAVForge never proposes a value that depends on something it cannot
         know (e.g. a battery voltage threshold, which depends on cell count - raise that
-        kind of gap to the person instead of guessing). Takes several seconds."""
-        return _call(provider, lambda v: v.diagnose(propose_fixes=propose_fixes))
+        kind of gap to the person instead of guessing). `baseline_backup_id`: also
+        compare against a saved backup (id from params_backups; same comparison as
+        params_diff) and return it as `baseline`. Takes several seconds."""
+        baseline = resolve_backup_id_safely(baseline_backup_id) if baseline_backup_id else None
+        return _call(provider, lambda v: v.diagnose(propose_fixes=propose_fixes, baseline=baseline))
 
     @server.tool(annotations=READ_ONLY)
     def setup_status() -> SetupReport:

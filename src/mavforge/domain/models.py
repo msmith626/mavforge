@@ -393,6 +393,10 @@ class DiagnosticReport(_Model):
     )
     disclaimer: str = AIRWORTHINESS_DISCLAIMER
     link: LinkStats
+    baseline: ParamDiffResult | None = Field(
+        default=None,
+        description="Drift against a saved baseline, only present when one was given.",
+    )
 
 
 class SetupStepStatus(StrEnum):

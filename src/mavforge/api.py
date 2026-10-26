@@ -226,7 +226,11 @@ class Vehicle:
         return status_service.snapshot(self.session)
 
     def diagnose(
-        self, *, prearm_wait: float = DEFAULT_PREARM_WAIT, propose_fixes: bool = False
+        self,
+        *,
+        prearm_wait: float = DEFAULT_PREARM_WAIT,
+        propose_fixes: bool = False,
+        baseline: str | Path | None = None,
     ) -> DiagnosticReport:
         """Classified findings from pre-arm reports, sensor health and configuration rules.
 
@@ -234,9 +238,16 @@ class Vehicle:
         ``propose_fixes``: also build a live ChangePlan for findings with a safe,
         judgment-free default (``Finding.proposed_plan``). Nothing is written: the
         plan still needs the normal approve -> apply path.
+        ``baseline``: also compare against a backup (path or backup id) or a
+        ``.param`` file (``report.baseline``) - the same comparison ``params.diff()``
+        does on its own.
         """
+        baseline_path = backup_service.resolve_reference(baseline) if baseline else None
         return diagnostics_service.diagnose(
-            self.session, prearm_wait=prearm_wait, propose_fixes=propose_fixes
+            self.session,
+            prearm_wait=prearm_wait,
+            propose_fixes=propose_fixes,
+            baseline_path=baseline_path,
         )
 
     def setup_status(self) -> SetupReport:

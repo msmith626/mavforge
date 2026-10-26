@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from mavforge.domain.errors import MAVForgeError
 from mavforge.domain.models import (
@@ -25,9 +26,10 @@ from mavforge.domain.outcomes import OperationStatus
 from mavforge.platforms.rules import ParamView, finding, run_rule
 from mavforge.protocol.commands import CommandOutcome, send_command
 from mavforge.protocol.messages import request_messages
-from mavforge.services.backup import build_backup
+from mavforge.services.backup import build_backup, load_backup
 from mavforge.services.catalog import DIAGNOSE, run_operation
 from mavforge.services.changes import plan_changes
+from mavforge.services.diff import compare
 from mavforge.services.session import Session
 from mavforge.services.status import build_status
 from mavforge.transport.dialect import Message, mavlink
@@ -298,6 +300,7 @@ def build_report(
     uptime: float | None = None,
     *,
     propose_fixes: bool = False,
+    baseline: tuple[str, ParamBackup] | None = None,
 ) -> DiagnosticReport:
     findings = (
         _uptime_findings(uptime, status)
@@ -313,6 +316,17 @@ def build_report(
         or not backup.complete
         or outcome.status is not OperationStatus.SUCCEEDED
     )
+    baseline_diff = None
+    if baseline is not None:
+        label, reference = baseline
+        baseline_diff = compare(
+            reference,
+            backup,
+            reference_label=label,
+            current_label="vehicle",
+            is_volatile=session.adapter.is_volatile_param,
+            vehicle=session.identity,
+        )
     return DiagnosticReport(
         status=OperationStatus.PARTIAL if partial else OperationStatus.SUCCEEDED,
         vehicle=session.identity,
@@ -320,6 +334,7 @@ def build_report(
         counts={kind: sum(f.kind is kind for f in findings) for kind in FindingKind},
         prearm_requested=outcome.status is OperationStatus.SUCCEEDED,
         link=session.link_stats(),
+        baseline=baseline_diff,
     )
 
 
@@ -328,6 +343,7 @@ def diagnose(
     *,
     prearm_wait: float = DEFAULT_PREARM_WAIT,
     propose_fixes: bool = False,
+    baseline_path: Path | None = None,
 ) -> DiagnosticReport:
     """Classified findings from pre-arm reports, sensor health and configuration rules.
 
@@ -335,7 +351,16 @@ def diagnose(
     live ChangePlan (``Finding.proposed_plan``). Off by default: diagnose() is otherwise
     a pure read, and building a plan re-reads current values and saves a plan file
     (see services.changes.plan_changes) as a side effect.
+
+    ``baseline_path``: also compare the live vehicle against this saved backup or
+    ``.param`` file (``report.baseline``), surfacing drift since whenever it was taken.
+    This is the same comparison ``params diff`` does on its own; diagnose() just runs
+    it as part of one report instead of a second command.
     """
+
+    # Loaded eagerly, before any vehicle I/O: a bad baseline file should fail fast,
+    # not after already downloading the full parameter set and waiting on pre-arm.
+    baseline = (baseline_path.name, load_backup(baseline_path)) if baseline_path else None
 
     def run() -> DiagnosticReport:
         status = build_status(session)
@@ -343,7 +368,14 @@ def diagnose(
         outcome, texts = request_prearm_report(session, prearm_wait)
         backup = build_backup(session)
         return build_report(
-            session, status, backup, outcome, texts, uptime, propose_fixes=propose_fixes
+            session,
+            status,
+            backup,
+            outcome,
+            texts,
+            uptime,
+            propose_fixes=propose_fixes,
+            baseline=baseline,
         )
 
     return run_operation(session, DIAGNOSE, run)

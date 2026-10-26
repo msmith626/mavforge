@@ -178,6 +178,24 @@ def test_diagnose_propose_fixes(make_fake: FakeFactory) -> None:
     assert "proposes a fix: `mavforge params apply " in stdout
 
 
+def test_diagnose_baseline_surfaces_drift(make_fake: FakeFactory, tmp_path: Path) -> None:
+    from mavforge.domain.models import ParamType
+
+    fake = make_fake()
+    baseline = tmp_path / "base.json"
+    invoke("-c", fake.connection_string, "params", "backup", "-o", str(baseline))
+    fake.set_param("FRAME_TYPE", 3, ParamType.INT8)
+
+    base = ("-c", fake.connection_string, "diagnose", "--prearm-wait", "0.5")
+    code, stdout, _ = invoke(*base)
+    assert "Baseline comparison" not in stdout  # not asked for
+
+    code, stdout, _ = invoke(*base, "--baseline", str(baseline))
+    assert code == ExitCode.OK
+    assert "Baseline comparison:" in stdout
+    assert "FRAME_TYPE" in stdout
+
+
 def test_diagnose_fail_on_passes_for_clean_vehicle(fake: FakeVehicle) -> None:
     code, _, _ = invoke(
         "-c", fake.connection_string, "diagnose", "--prearm-wait", "0.5", "--fail-on", "warning"

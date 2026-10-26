@@ -1,6 +1,9 @@
 """End-to-end diagnostics against the fake vehicle."""
 
+from pathlib import Path
 from typing import Any
+
+import pytest
 
 import mavforge
 from mavforge.domain.models import FindingKind, FindingSource, ParamType
@@ -135,6 +138,41 @@ def test_airspeed_used_without_a_sensor_proposes_disabling_it(make_fake: FakeFac
     plan = airspeed_finding.proposed_plan
     assert plan is not None
     assert [(c.name, c.requested) for c in plan.changes] == [("ARSPD_USE", 0)]
+
+
+def test_diagnose_baseline_wires_through_the_same_comparison_as_params_diff(
+    make_fake: FakeFactory, tmp_path: Path
+) -> None:
+    fake = make_fake()
+    with mavforge.connect(fake.connection_string) as vehicle:
+        baseline = tmp_path / "base.json"
+        vehicle.params.backup(baseline)
+        fake.set_param("FRAME_TYPE", 3, ParamType.INT8)
+        report = vehicle.diagnose(prearm_wait=0.5, baseline=baseline)
+        direct_diff = vehicle.params.diff(baseline)
+    assert report.baseline is not None
+    assert report.baseline.changed == direct_diff.changed
+
+
+def test_diagnose_without_baseline_leaves_it_none(make_fake: FakeFactory) -> None:
+    fake = make_fake()
+    with mavforge.connect(fake.connection_string) as vehicle:
+        report = vehicle.diagnose(prearm_wait=0.5)
+    assert report.baseline is None
+
+
+def test_diagnose_baseline_fails_fast_on_a_bad_path_before_touching_the_vehicle(
+    make_fake: FakeFactory, tmp_path: Path
+) -> None:
+    from mavforge.domain.errors import InvalidInputError
+
+    fake = make_fake()
+    with (
+        mavforge.connect(fake.connection_string) as vehicle,
+        pytest.raises(InvalidInputError),
+    ):
+        vehicle.diagnose(baseline=tmp_path / "does-not-exist.json")
+    assert "PARAM_REQUEST_LIST" not in fake.received_types()
 
 
 def test_servo_output_range_fault_surfaces_through_diagnose(make_fake: FakeFactory) -> None:

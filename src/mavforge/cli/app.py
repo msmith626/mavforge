@@ -416,7 +416,9 @@ _KIND_STYLE = {
 }
 
 
-def make_render_diagnose(show_passed: bool) -> Callable[[DiagnosticReport], None]:
+def make_render_diagnose(
+    show_passed: bool, include_volatile: bool = False
+) -> Callable[[DiagnosticReport], None]:
     def render(r: DiagnosticReport) -> None:
         out.print(
             Text(
@@ -449,6 +451,9 @@ def make_render_diagnose(show_passed: bool) -> Callable[[DiagnosticReport], None
         out.print(Text(f"Summary: {counts}", style="bold"))
         if not show_passed and r.counts.get(FindingKind.PASSED):
             out.print(Text("Use --show-passed to list passed checks.", style="dim"))
+        if r.baseline is not None:
+            out.print(Text("Baseline comparison:", style="bold"))
+            make_render_diff(include_volatile)(r.baseline)
         out.print(Text(r.disclaimer, style="dim"))
         _status_line(r.status)
 
@@ -675,6 +680,14 @@ def diagnose(
             "written: review and apply with 'params apply'.",
         ),
     ] = False,
+    baseline: Annotated[
+        str | None,
+        typer.Option("--baseline", help="Also compare against this backup id/file or .param file."),
+    ] = None,
+    include_volatile: Annotated[
+        bool,
+        typer.Option("--all", "-a", help="With --baseline, also show volatile changes."),
+    ] = False,
 ) -> None:
     """Find configuration and readiness problems, classified by certainty (read-only)."""
     if fail_on not in (None, "fault", "warning"):
@@ -688,8 +701,10 @@ def diagnose(
 
     _with_vehicle(
         ctx,
-        lambda v: v.diagnose(prearm_wait=prearm_wait, propose_fixes=propose_fixes),
-        make_render_diagnose(show_passed),
+        lambda v: v.diagnose(
+            prearm_wait=prearm_wait, propose_fixes=propose_fixes, baseline=baseline
+        ),
+        make_render_diagnose(show_passed, include_volatile),
         exit_code,
     )
 

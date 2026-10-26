@@ -229,7 +229,7 @@ accordingly, not treated as blockers:
   that changes the attack surface rather than extending existing machinery.
 - MCP over localhost HTTP (stdio only today).
 
-### Diagnostics (2, remaining)
+### Diagnostics (0, remaining)
 - **Findings that propose a parameter plan: done.** Built for M8b
   (`propose_fixes`/`Finding.proposed_plan`), already in production use for the
   `logging` and (as of 2026-10-26) `airspeed_setup` rules — the ones with a complete,
@@ -271,7 +271,20 @@ accordingly, not treated as blockers:
   documented "no SERVOx_FUNCTION set to MotorX" check, which needs frame-specific
   motor-count knowledge this rule doesn't have. See `docs/research.md` ("Diagnostics
   rules").
-- Optional comparison against a saved baseline inside the report.
+- **Optional comparison against a saved baseline inside the report: done
+  (2026-10-26).** Built on the existing diff machinery (`services/diff.py`'s pure
+  `compare()`, already used by `params diff`) rather than a new comparison engine:
+  `diagnose(baseline=...)` loads the baseline eagerly, before any vehicle contact (a
+  bad file fails fast, not after already downloading the whole parameter set and
+  waiting on pre-arm), then runs the same `compare()` against the freshly-downloaded
+  backup it builds anyway for the parameter rules. Surfaced as `DiagnosticReport.baseline`
+  (`ParamDiffResult | None`), reusing the CLI's existing diff renderer rather than a
+  new one. MCP takes `baseline_backup_id` (a backup id only, resolved through the same
+  `resolve_backup_id_safely()` guard `params_diff` already uses — agents don't get an
+  arbitrary filesystem path); CLI/API take a path or backup id, same as `params diff`
+  itself. Covered at the service (direct comparison against `params.diff()`'s own
+  result), CLI, and MCP (including the path-traversal-refusal test, mirrored from
+  `params_diff`'s existing one) layers.
 
 ### Parameters (2, remaining)
 - MAVFTP `@PARAM/param.pck` bulk download, which is much faster than

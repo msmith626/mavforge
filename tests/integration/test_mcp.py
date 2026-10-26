@@ -193,3 +193,38 @@ def test_diagnose_tool_propose_fixes(make_fake: FakeFactory) -> None:
         f for f in on.structured_content["findings"] if f["check"] == "ardupilot.logging"
     )
     assert logging_on["proposed_plan"]["changes"][0]["requested"] == 1
+
+
+def test_diagnose_tool_with_baseline(fake: FakeVehicle) -> None:
+    server, provider = _server(fake.connection_string)
+
+    async def run() -> tuple[Any, Any]:
+        async with Client(server) as client:
+            backup = await client.call_tool("params_backup", {})
+            backup_id = backup.structured_content["backup_id"]
+            report = await client.call_tool("diagnose", {"baseline_backup_id": backup_id})
+            return backup, report
+
+    try:
+        _, report = anyio.run(run)
+    finally:
+        provider.close()
+    assert not report.is_error
+    baseline = report.structured_content["baseline"]
+    assert baseline is not None
+    assert baseline["changed"] == []
+    assert baseline["current"] == "vehicle"
+
+
+def test_diagnose_without_baseline_omits_it(fake: FakeVehicle) -> None:
+    result = call(fake.connection_string, "diagnose")
+    assert result.structured_content["baseline"] is None
+
+
+@pytest.mark.parametrize("backup_id", ["../../etc/passwd", "/etc/passwd", "x/../y.json"])
+def test_agents_cannot_use_diagnose_baseline_for_arbitrary_paths(
+    fake: FakeVehicle, backup_id: str
+) -> None:
+    result = call(fake.connection_string, "diagnose", {"baseline_backup_id": backup_id})
+    assert result.is_error
+    assert "invalid_input" in result.content[0].text
