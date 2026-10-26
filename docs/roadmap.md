@@ -182,7 +182,14 @@ accordingly, not treated as blockers:
   already reconnects between calls, and link loss is detected and reported.
 - Wrong-vehicle tests beyond the current ones (selection when several vehicles or GCS
   heartbeats are present).
-- Security review against `docs/risks.md`.
+- **Security review against `docs/risks.md`: done (2026-10-26).** All 17 risks
+  re-verified against current code (not just the register's own claims), specifically
+  scrutinizing the M8/M9 work for anything bypassing the existing permission/approval
+  architecture — it doesn't; every new write path composes with `plan_changes()` /
+  `apply_plan()` rather than adding a parallel one. No findings, no new risk needed.
+  Full writeup: [security-review.md](security-review.md). Worth another pass whenever
+  MCP-over-HTTP (below) actually ships — that's the one item left in this section
+  that changes the attack surface rather than extending existing machinery.
 - MCP over localhost HTTP (stdio only today).
 
 ### Diagnostics (3, remaining)

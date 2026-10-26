@@ -1,5 +1,9 @@
 # Risk register
 
+**Last reviewed: 2026-10-26** — all 17 risks below re-verified against current code,
+including the M8/M9 work (flight-mode assignment, `propose_fixes`, `setup_status`); no
+new risk found. Full writeup: [security-review.md](security-review.md).
+
 | # | Risk | Likelihood / impact | Mitigation | Status |
 |---|---|---|---|---|
 | 1 | pymavlink's global dialect state and `recv_match` dropping messages corrupt concurrent operations | High / High | Dialect set once (`transport/dialect.py`). Single reader thread + `MessageRouter` | Done; router unit tests |

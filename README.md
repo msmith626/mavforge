@@ -173,7 +173,7 @@ MAVFORGE_HW_CONNECTION=/dev/ttyACM0 uv run pytest -m hardware   # opt-in, read-o
 
 - [Assessment](docs/assessment.md): project state, positioning and gaps
 - [Research notes](docs/research.md): MAVLink, ArduPilot, Mission Planner and MCP findings, with sources
-- [Architecture](docs/architecture.md) · [Risks](docs/risks.md) · [Roadmap](docs/roadmap.md)
+- [Architecture](docs/architecture.md) · [Risks](docs/risks.md) · [Security review](docs/security-review.md) · [Roadmap](docs/roadmap.md)
 - [Calibration](docs/calibration.md) · [SITL](docs/sitl.md) · [MCP setup](docs/mcp-setup.md) · [MAVForge and MAVProxy](docs/mavproxy.md) · [Wireless links](docs/wireless.md)
 - [Contributing](CONTRIBUTING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
