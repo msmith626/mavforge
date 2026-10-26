@@ -204,10 +204,21 @@ accordingly, not treated as blockers:
   non-flaky way to deterministically sever a real SITL connection mid-write, and the
   *existing* link-loss-detection feature has no SITL coverage for the same reason —
   consistent with that precedent, not a new gap.
-- Wrong-vehicle tests beyond the current ones (selection when several vehicles or GCS
-  heartbeats are present).
-- Wrong-vehicle tests beyond the current ones (selection when several vehicles or GCS
-  heartbeats are present).
+- **Wrong-vehicle tests beyond the current ones: done (2026-10-26).** Read the actual
+  selection code (`session.py`'s `wait_for_vehicle`) before writing tests against an
+  assumed heuristic: it returns the *first* `MAV_COMP_ID_AUTOPILOT1` heartbeat seen
+  (falling back to the first autopilot-type heartbeat of any component if none ever
+  arrives), not "lowest sysid" or similar — ambiguous multi-vehicle selection is
+  genuinely arrival-order-dependent by design, which a new test would need unreliable
+  timing control to exercise directly, so it wasn't forced. Three new tests that don't
+  need that: (1) the fallback-to-non-AUTOPILOT1 path, previously uncovered — every
+  existing test's vehicle happened to use the default component id; (2) GCS heartbeats
+  and multiple other real vehicles present *together*, not just each scenario alone;
+  (3) the most directly safety-relevant one — a plan made for one vehicle on a
+  multi-vehicle link is refused (`same_vehicle_problems`, risk #2) when applied against
+  a *different* real vehicle reachable on that same link, not just against an
+  unrelated fake-vehicle instance as the one existing identity-mismatch test
+  (`test_calibration.py`) already covered.
 - **Security review against `docs/risks.md`: done (2026-10-26).** All 17 risks
   re-verified against current code (not just the register's own claims), specifically
   scrutinizing the M8/M9 work for anything bypassing the existing permission/approval
