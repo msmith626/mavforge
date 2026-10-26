@@ -156,6 +156,22 @@ def record_result(result: ApplyResult) -> None:
     path.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
 
+def load_result(plan_id: str) -> ApplyResult:
+    """Load a plan's recorded outcome (what applying it actually did), for a later
+    retry of whatever it left unresolved."""
+    path = _path(plan_id, ".applied")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise InvalidInputError(
+            f"No recorded result for plan {plan_id}: it may never have been applied"
+        ) from None
+    try:
+        return ApplyResult.model_validate_json(text)
+    except ValidationError as exc:
+        raise InvalidInputError(f"{path} is not a valid MAVForge apply result") from exc
+
+
 def list_plans() -> PlanListResult:
     infos: list[PlanInfo] = []
     directory = plans_dir()

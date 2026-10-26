@@ -1212,6 +1212,27 @@ def params_restore(
     _with_vehicle(ctx, act, render_apply, policy=_WRITE_POLICY)
 
 
+@params_app.command("retry")
+def params_retry(
+    ctx: typer.Context,
+    plan_ref: Annotated[
+        str, typer.Argument(metavar="PLAN", help="Id of a plan that was applied before.")
+    ],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Approve without prompting.")] = False,
+    offline: Annotated[bool, typer.Option(help="Do not download parameter metadata.")] = False,
+) -> None:
+    """Re-attempt whatever an earlier apply left unresolved (unknown or not attempted -
+    typically a link loss), then verify. Changes the vehicle is already apply's job: what
+    this adds is not needing to work out by hand which parameters are still outstanding."""
+
+    def act(vehicle: mavforge.Vehicle) -> ApplyResult:
+        plan = vehicle.params.plan_retry(plan_ref, offline=offline)
+        _confirm_and_approve(plan, yes)
+        return vehicle.params.apply(plan)
+
+    _with_vehicle(ctx, act, render_apply, policy=_WRITE_POLICY)
+
+
 @params_app.command("apply")
 def params_apply(
     ctx: typer.Context,

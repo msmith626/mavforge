@@ -237,6 +237,37 @@ def test_restore_via_cli(fake: FakeVehicle) -> None:
     }
 
 
+def test_retry_via_cli(make_fake: FakeFactory) -> None:
+    fake = make_fake(drop_link_after_sets=1)
+    code, stdout, _ = invoke(
+        "-c", fake.connection_string, "--json", "params", "set", "RC1_TRIM=1490", "RC1_MAX=1950",
+        "-y",
+    )  # fmt: skip
+    assert code == ExitCode.TIMEOUT  # link loss is reported (status=unknown), not a crash
+    result = json.loads(stdout)
+    assert {c["name"]: c["outcome"] for c in result["changes"]} == {
+        "RC1_TRIM": "unknown",
+        "RC1_MAX": "not_attempted",
+    }
+    fake.config.drop_link_after_sets = None  # the link is back
+    code, stdout, stderr = invoke(
+        "-c", fake.connection_string, "--json", "params", "retry", result["plan_id"], "-y"
+    )
+    assert code == ExitCode.OK, stderr
+    retried = {c["name"]: c["outcome"] for c in json.loads(stdout)["changes"]}
+    assert retried == {"RC1_TRIM": "unchanged", "RC1_MAX": "verified"}  # see test_param_changes.py
+
+
+def test_retry_nothing_left_fails_clearly(fake: FakeVehicle) -> None:
+    code, stdout, _ = invoke(
+        "-c", fake.connection_string, "--json", "params", "set", "RC1_TRIM=1490", "-y"
+    )
+    plan_id = json.loads(stdout)["plan_id"]
+    code, _, stderr = invoke("-c", fake.connection_string, "params", "retry", plan_id, "-y")
+    assert code == ExitCode.USAGE  # plan_retry's InvalidInputError, its class default
+    assert "othing to retry" in stderr
+
+
 def test_calibrate_gyro_cli(fake: FakeVehicle) -> None:
     code, stdout, stderr = invoke("-c", fake.connection_string, "calibrate", "gyro", "--yes")
     assert code == ExitCode.OK, stderr

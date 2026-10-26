@@ -309,6 +309,34 @@ def plan_restore(
     )
 
 
+_RETRYABLE = frozenset({ChangeOutcome.UNKNOWN, ChangeOutcome.NOT_ATTEMPTED})
+"""Only these mean "we don't actually know what happened, or definitely never tried" -
+exactly a link-loss symptom. FAILED means the vehicle rejected the write or read-back
+disagreed (retrying won't fix that on its own); SKIPPED means the baseline moved since
+the plan was made (the drift-safety check, see apply_plan) - both need a person to look
+again, not a blind retry."""
+
+
+def plan_retry(session: Session, result: ApplyResult, *, offline: bool = False) -> ChangePlan:
+    """Plan re-attempting whatever an earlier apply left unresolved (a link loss stopped
+    it, typically): everything that was UNKNOWN or NOT_ATTEMPTED, at its original
+    requested value. Goes through the same approve -> apply path as any other plan."""
+    retry = {c.name: c.requested for c in result.changes if c.outcome in _RETRYABLE}
+    if not retry:
+        raise InvalidInputError(
+            f"Nothing to retry in plan {result.plan_id}: every change already resolved "
+            "(verified, unchanged, failed or skipped)."
+        )
+    return plan_changes(
+        session,
+        retry,
+        offline=offline,
+        kind="set",
+        source=result.plan_id,
+        extra_warnings=[f"Retrying unresolved changes from plan {result.plan_id}."],
+    )
+
+
 # -- applying -----------------------------------------------------------------------
 
 

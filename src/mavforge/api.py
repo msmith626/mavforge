@@ -122,6 +122,14 @@ class Params:
         ref = plan.plan_id if isinstance(plan, ChangePlan) else plan
         return changes_service.apply_plan(self._session, ref)
 
+    def plan_retry(self, result: ApplyResult | str, *, offline: bool = False) -> ChangePlan:
+        """Plan re-attempting whatever an earlier :meth:`apply` left unresolved (a link
+        loss stopped it, typically) at its original requested value. ``result`` is the
+        ``ApplyResult`` itself, or the id of the plan that produced it. Goes through
+        the same approve -> apply path as any other plan."""
+        loaded = result if isinstance(result, ApplyResult) else plan_store.load_result(result)
+        return changes_service.plan_retry(self._session, loaded, offline=offline)
+
     def diff(self, reference: str | Path) -> ParamDiffResult:
         """Compare the vehicle with a backup (path or backup id) or a ``.param`` file."""
         return diff_service.diff_vehicle(self._session, backup_service.resolve_reference(reference))

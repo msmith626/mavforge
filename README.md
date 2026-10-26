@@ -41,6 +41,7 @@ See [docs/mavproxy.md](docs/mavproxy.md).
 | Board orientation check: three guided poses that find how the flight controller is mounted and propose `AHRS_ORIENTATION` as a change plan | `vehicle.calibration.start_orientation()`, then `approve_plan` and `params.apply` | `mavforge calibrate orientation [--plan-only]` | not via MCP | fake vehicle, ArduCopter 4.7.2 SITL (simulated rotated board), ArduPlane 4.6.2 hardware |
 | Flight mode assignment: sweeps the FLTMODE_CH switch to confirm each requested position is reachable, then proposes `FLTMODE1..FLTMODE6` as a change plan | `vehicle.calibration.start_flight_modes()`, then `approve_plan` and `params.apply` | `mavforge calibrate flight-modes FLTMODEn=VALUE ... [--plan-only]` | not via MCP | fake vehicle, ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
 | Restore from a backup (identity-checked) | `vehicle.params.plan_restore()` | `mavforge params restore` | `params_plan_restore` | fake vehicle, ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
+| Retry whatever a previous apply left unresolved (`unknown`/`not_attempted` only — typically a link loss) at its original value | `vehicle.params.plan_retry()` | `mavforge params retry <plan-id>` | `params_plan_retry` (with `--allow-configure`) | fake vehicle |
 | List operations and permissions | `mavforge.capabilities()` | `mavforge capabilities` | `mavforge_capabilities` | unit tests |
 
 Hardware evidence so far is one board: ArduPlane 4.6.2 on a USB-connected flight controller.

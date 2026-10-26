@@ -178,8 +178,34 @@ accordingly, not treated as blockers:
 - A fresh-clone quick start, verified on a second machine.
 
 ### Hardening (5)
-- Recover from link loss *during* a long operation (calibration). The MCP server
-  already reconnects between calls, and link loss is detected and reported.
+- **Recover from link loss *during* a long operation: re-scoped, partly done
+  (2026-10-26).** Checked the actual current behavior before assuming the gap: both
+  calibration (`operations.py`) and `apply_plan` already detect link loss cleanly and
+  report it (`UNKNOWN`/`NOT_ATTEMPTED`, no hang, no blind retry) — that part was
+  already done, just not reflected here. The MCP server's `VehicleProvider` already
+  reconnects, but only *between* calls, which doesn't help an operation already running
+  in a background thread. The real remaining gap split into two very different sizes:
+  automatic reconnect-and-resume for an *in-progress* sweep (radio/orientation/
+  flight-modes) is a genuinely new feature with real connection-lifecycle design
+  questions, deliberately deferred rather than designed on the spot. The small,
+  bounded piece — a retry helper for `apply_plan`'s partial results — is done: a new
+  `plan_retry()` (`services/changes.py`) builds a plan from only what an earlier apply
+  left `UNKNOWN`/`NOT_ATTEMPTED`, at its original requested value. `FAILED` (the
+  vehicle rejected it, or read-back disagreed) and `SKIPPED` (the baseline moved since
+  planning) are deliberately excluded — both need a person to look again, not a blind
+  repeat. Needed a new `plan_store.load_result()` (the `.applied.json` file was
+  already written, nothing read it back before). CLI `mavforge params retry <plan-id>`
+  (same shape as `params restore`); API `vehicle.params.plan_retry()` (takes either the
+  `ApplyResult` in hand or just the plan id); MCP `params_plan_retry`, gated the same
+  as `params_plan`/`params_plan_restore`. Covered by fake-vehicle integration tests
+  (including the realistic case: a write can actually succeed even when its
+  acknowledgment is lost, so retrying it correctly comes back `UNCHANGED`, not a
+  redundant `VERIFIED`), CLI and MCP tests. No SITL test: there's no clean,
+  non-flaky way to deterministically sever a real SITL connection mid-write, and the
+  *existing* link-loss-detection feature has no SITL coverage for the same reason —
+  consistent with that precedent, not a new gap.
+- Wrong-vehicle tests beyond the current ones (selection when several vehicles or GCS
+  heartbeats are present).
 - Wrong-vehicle tests beyond the current ones (selection when several vehicles or GCS
   heartbeats are present).
 - **Security review against `docs/risks.md`: done (2026-10-26).** All 17 risks

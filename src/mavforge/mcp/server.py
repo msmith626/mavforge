@@ -405,6 +405,16 @@ def _register_write_tools(server: MCPServer, provider: VehicleProvider) -> None:
         path = resolve_backup_id_safely(backup_id)
         return _call(provider, lambda v: v.params.plan_restore(path, allow_mismatch=allow_mismatch))
 
+    @server.tool(annotations=CREATES_LOCAL_FILE)
+    def params_plan_retry(plan_id: str) -> ChangePlan:
+        """Propose re-attempting whatever an earlier params_apply left unresolved (a
+        link loss typically causes this: changes come back `unknown` or
+        `not_attempted`), at the original requested value. Does NOT change the
+        vehicle. Fails if every change in that plan already resolved - there is
+        nothing to retry. `failed` or `skipped` changes are never included: those need
+        the user to look again, not a blind repeat."""
+        return _call(provider, lambda v: v.params.plan_retry(plan_id))
+
     @server.tool(annotations=READ_ONLY)
     def params_plans() -> PlanListResult:
         """List change plans and whether each is pending, approved or applied."""

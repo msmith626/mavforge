@@ -13,7 +13,13 @@ from mavforge.policy.permissions import Policy
 from mavforge.services.session import ConnectOptions
 from mavforge.testing.fake_vehicle import FakeFactory, FakeVehicle
 
-WRITE_TOOLS = {"params_plan", "params_plan_restore", "params_plans", "params_apply"}
+WRITE_TOOLS = {
+    "params_plan",
+    "params_plan_restore",
+    "params_plan_retry",
+    "params_plans",
+    "params_apply",
+}
 
 
 def server_for(fake: FakeVehicle, policy: Policy) -> tuple[Any, VehicleProvider]:
@@ -128,3 +134,32 @@ def test_real_vehicle_requires_operator_flag(make_fake: FakeFactory) -> None:
     assert applied.is_error
     assert "not_permitted" in applied.content[0].text
     assert writes(fake) == 0
+
+
+def test_params_plan_retry_tool(make_fake: FakeFactory) -> None:
+    fake = make_fake(drop_link_after_sets=1)
+
+    async def accept(ctx: Any, params: Any) -> ElicitResult:
+        return ElicitResult(action="accept", content={"approve": True})
+
+    async def steps(client: Client) -> Any:
+        plan = await client.call_tool(
+            "params_plan", {"changes": {"RC1_TRIM": 1490, "RC1_MAX": 1950}}
+        )
+        plan_id = plan.structured_content["plan_id"]
+        applied = await client.call_tool("params_apply", {"plan_id": plan_id})
+        outcomes = {c["name"]: c["outcome"] for c in applied.structured_content["changes"]}
+        assert outcomes == {"RC1_TRIM": "unknown", "RC1_MAX": "not_attempted"}
+        return await client.call_tool("params_plan_retry", {"plan_id": plan_id})
+
+    retry = run(fake, Policy.configure(allow_real_vehicle=False), steps, accept)
+    assert not retry.is_error
+    assert {c["name"] for c in retry.structured_content["changes"]} == {"RC1_TRIM", "RC1_MAX"}
+
+
+def test_params_plan_retry_absent_without_allow_configure(fake: FakeVehicle) -> None:
+    async def steps(client: Client) -> Any:
+        return {t.name for t in (await client.list_tools()).tools}
+
+    names = run(fake, Policy.read_only(), steps)
+    assert "params_plan_retry" not in names

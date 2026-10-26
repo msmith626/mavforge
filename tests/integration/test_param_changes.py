@@ -196,6 +196,70 @@ def test_link_loss_mid_batch_is_unknown_not_failed(make_fake: FakeFactory) -> No
     assert plan_store.is_applied(plan.plan_id)
 
 
+def test_retry_after_link_loss_resolves_the_rest(make_fake: FakeFactory) -> None:
+    """The scenario the link-loss test above leaves unresolved, picked up from here:
+    the link is back, and plan_retry only needs to cover what's actually outstanding."""
+    fake = make_fake(drop_link_after_sets=1)
+    with connect(fake) as vehicle:
+        plan = vehicle.params.plan({"RC1_TRIM": 1490, "RC1_MAX": 1950})
+        mavforge.approve_plan(plan)
+        result = vehicle.params.apply(plan)
+    assert outcomes(result) == {
+        "RC1_TRIM": ChangeOutcome.UNKNOWN,
+        "RC1_MAX": ChangeOutcome.NOT_ATTEMPTED,
+    }
+    fake.config.drop_link_after_sets = None  # the link is back
+    with connect(fake) as vehicle:
+        retry = vehicle.params.plan_retry(result)
+        assert {c.name for c in retry.changes} == {"RC1_TRIM", "RC1_MAX"}
+        mavforge.approve_plan(retry)
+        retried = vehicle.params.apply(retry)
+    # RC1_TRIM: the fake vehicle actually applied it before dropping the link (realistic -
+    # a write can succeed even when its ack is lost), so the retry plan correctly sees
+    # "already has this value" and doesn't write it again: UNCHANGED, not a redundant
+    # VERIFIED. RC1_MAX genuinely never reached the vehicle the first time, so it does
+    # get written now.
+    assert outcomes(retried) == {
+        "RC1_TRIM": ChangeOutcome.UNCHANGED,
+        "RC1_MAX": ChangeOutcome.VERIFIED,
+    }
+
+
+def test_retry_by_plan_id_loads_the_recorded_result(make_fake: FakeFactory) -> None:
+    """The CLI/MCP path: a separate call, only the plan id in hand, no ApplyResult
+    object carried over in memory."""
+    fake = make_fake(drop_link_after_sets=1)
+    with connect(fake) as vehicle:
+        plan = vehicle.params.plan({"RC1_TRIM": 1490, "RC1_MAX": 1950})
+        mavforge.approve_plan(plan)
+        vehicle.params.apply(plan)
+    fake.config.drop_link_after_sets = None
+    with connect(fake) as vehicle:
+        retry = vehicle.params.plan_retry(plan.plan_id)  # string, not the ApplyResult
+    assert {c.name for c in retry.changes} == {"RC1_TRIM", "RC1_MAX"}
+
+
+def test_retry_excludes_failed_and_skipped_and_errors_if_nothing_left(
+    make_fake: FakeFactory,
+) -> None:
+    fake = make_fake(param_write_errors={"RC1_MIN": mavlink.MAV_PARAM_ERROR_PERMISSION_DENIED})
+    with connect(fake) as vehicle:
+        plan = vehicle.params.plan({"RC1_MIN": 1000, "RC1_TRIM": 1490})
+        mavforge.approve_plan(plan)
+        result = vehicle.params.apply(plan)
+    assert outcomes(result) == {
+        "RC1_MIN": ChangeOutcome.FAILED,
+        "RC1_TRIM": ChangeOutcome.VERIFIED,
+    }
+    with connect(fake) as vehicle, pytest.raises(InvalidInputError, match=r"[Nn]othing to retry"):
+        vehicle.params.plan_retry(result)
+
+
+def test_retry_unknown_plan_id_is_a_clear_error(fake: FakeVehicle) -> None:
+    with connect(fake) as vehicle, pytest.raises(InvalidInputError, match=r"[Nn]o recorded result"):
+        vehicle.params.plan_retry("0" * 12)
+
+
 def test_audit_failure_blocks_writes(fake: FakeVehicle, isolated_state_dir: Path) -> None:
     with connect(fake) as vehicle:
         plan = vehicle.params.plan({"RC1_TRIM": 1490})
