@@ -307,13 +307,15 @@ accordingly, not treated as blockers:
   on a wrong assumption indefinitely. See `docs/research.md` ("MAVFTP bulk parameter
   download") for the full writeup.
 
-  Tested at all three layers: `protocol/param_pack.py` against hand-built bytes from
+  Tested at all four layers: `protocol/param_pack.py` against hand-built bytes from
   the spec (unit), the FTP client against the fake vehicle's new FTP server
-  (multi-chunk, server-side failure, capability-absent, timeout), and - the
-  authoritative check for a binary format like this - against real ArduCopter 4.7.2
-  SITL: `param.pck` decodes to exactly the same parameter set `PARAM_REQUEST_LIST`
-  gets, and a monkeypatch confirms the fallback is never actually taken when FTP
-  works. Two pre-existing tests (`test_incomplete_backup_is_partial_and_marked`,
+  (multi-chunk, server-side failure, capability-absent, timeout), real ArduCopter
+  4.7.2 SITL (`param.pck` decodes to exactly the same parameter set
+  `PARAM_REQUEST_LIST` gets; a monkeypatch confirms the fallback is never actually
+  taken when FTP works), and real ArduPlane 4.6.2 hardware over USB serial (same
+  exact-match check, plus a real-world number: **1.11s via FTP vs 16.28s via
+  PARAM_REQUEST_LIST for the same 1117 parameters**, about 15x). Two pre-existing
+  tests (`test_incomplete_backup_is_partial_and_marked`,
   `test_list_recovers_dropped_parameters`) tested PARAM_REQUEST_LIST-specific
   fault-injection knobs that have no MAVFTP equivalent; pinned to
   `ftp_enabled=False` rather than taught to the fake FTP server, since an incomplete
@@ -344,4 +346,5 @@ Bench board: ArduPlane 4.6.2 over USB, unconfigured airframe, indoors (no GPS fi
 | `mavforge setup` (M9) | passed; correctly showed orientation/gyro/level `unknown`, everything else `done`, over USB | 2026-10-25 |
 | Flight mode assignment (Spektrum DX7s) | passed, after finding and fixing a real misconfiguration: `FLTMODE_CH=8` pointed at a dead channel (confirmed with a live RC monitor and a `calibrate radio` sweep — RC8 never moved). Corrected to the real 3-position switch (RC6); RTL/FBWA/MANUAL all confirmed reachable. Also fixed a CLI bug found in the process: live sweep progress was never rendered for this check (worked internally, displayed nothing) | 2026-10-26 |
 | `diagnose --propose-fixes` (M8b) | passed; disabled `LOG_BACKEND_TYPE`, confirmed the plan builds only with the flag, applied and verified back to its original value | 2026-10-26 |
+| MAVFTP bulk param download | passed; 1117 params, exact match against `PARAM_REQUEST_LIST` (only `STAT_RUNTIME` differed, a known-volatile counter); **1.11s via FTP vs 16.28s via `PARAM_REQUEST_LIST`** on this real USB-serial link, about 15x; `backup()` confirmed to use FTP, not fall back | 2026-10-26 |
 | 6-position accelerometer calibration | not yet run | |

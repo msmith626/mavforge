@@ -414,6 +414,14 @@ These are the sources for the ArduPilot rules in `platforms/ardupilot/rules.py`.
   failure. Confirmed against real SITL that the fallback is *not* taken when FTP
   works (a monkeypatch makes the fallback explode if it's ever called) - this is the
   thing that was actually broken until the seq_number fix above, now confirmed fixed.
+- **ArduPlane 4.6.2 hardware (USB serial, 2026-10-26).** 1117 parameters, FTP and
+  `PARAM_REQUEST_LIST` downloads compared directly: identical name set, the only
+  differing value was `STAT_RUNTIME` (a live counter, already matched by the
+  ArduPilot adapter's `is_volatile_param`). The speed difference was dramatic on this
+  real serial link, not just SITL's TCP loopback: **1.11s via FTP vs 16.28s via
+  PARAM_REQUEST_LIST for the same 1117 parameters** - about 15x. `backup()` confirmed
+  (by the same fallback-must-not-be-called tripwire as the SITL test) to use FTP, not
+  fall back, on this hardware too. [verified]
 - **Writes deliberately excluded.** `write_param()`'s PARAM_SET-with-read-back
   verification is core to this project's safety model; MAVFTP's `WriteFile` path has
   no equivalent per-parameter verification, so it was not built.
