@@ -3,7 +3,7 @@
 Each phase ends green: `ruff`, `pyright --strict`, `pytest`, and `pytest -m sitl`.
 Capabilities are claimed only once they are tested.
 
-Status as of 2026-10-23.
+Status as of 2026-10-26.
 
 ## Done
 
@@ -69,12 +69,9 @@ guessed). **This is two architecturally different pieces of work, not one featur
       `mavforge setup` reported this step `done` the entire time `FLTMODE_CH=8` was
       pointing at a dead channel. The rule only checks `FLTMODE_CH != 0`, which cannot
       tell "a channel number is set" apart from "that channel actually carries a
-      signal" — the exact distinction that mattered here. Unlike orientation/gyro/level
-      (never claimed `done`, by design), this one gave a confident wrong answer. Worth
-      fixing: either downgrade this step to `unknown` whenever `FLTMODE_CH != 0`
-      (parameters alone can't confirm reachability, only a live sweep can — see
-      `calibrate flight-modes`), or have `setup_status` check for RC_RECEIVER health /
-      recent RC activity before calling it `done`. Not fixed yet.
+      signal" — the exact distinction that mattered here. **Fixed same day**: a PASSED
+      finding for this one step now downgrades to `unknown` in `setup_status` (the
+      SUSPECTED/disabled case is unaffected and stays reliable) — see M9, below.
 - **M8b — Failsafe review.** Not a guided workflow — there's no physical action
   involved, so this is a `diagnose` extension (`services/diagnostics.py` /
   `platforms/ardupilot/rules.py`), reading `FS_SHORT_ACTN`, `FS_LONG_ACTN`,
@@ -153,6 +150,9 @@ accordingly, not treated as blockers:
   parity (API/CLI/MCP agree) — **and** a SITL test, since SITL now runs on this Mac
   (see Release, below): confirmed against real ArduCopter 4.7.2 firmware that
   orientation/gyro/level correctly stay `unknown` and the sequence order is right.
+  **Hardware** (2026-10-26): the `ardupilot.flight_modes`-passed-means-unknown fix
+  above, directly motivated by and verified against the real ArduPlane bench board —
+  see M8a's hardware bullet.
 
 ### Release (6)
 - First CI run on GitHub. `.github/workflows/ci.yml` runs checks on Python 3.12–3.14
@@ -160,9 +160,9 @@ accordingly, not treated as blockers:
 - SITL run on this Mac for the first time (2026-10-24), Python 3.14.7, under Colima
   (`--vm-type=vz --vz-rosetta`, native arm64 VM; Rosetta accelerates the `linux/amd64`
   SITL image rather than emulating a full x86_64 VM, which is far slower): all 17
-  existing SITL tests passed against real ArduCopter 4.7.2 firmware. No SITL test
-  exists yet specifically for M8a (flight-mode assignment) or M8b (`propose_fixes`) —
-  this confirms the existing suite and the environment, not new coverage for M8.
+  existing SITL tests passed against real ArduCopter 4.7.2 firmware that day. SITL
+  coverage for M8a and M8b specifically followed shortly after (2026-10-24; see their
+  own entries above) — 20 SITL tests pass as of 2026-10-26.
 - API, CLI and MCP reference docs; a compatibility matrix backed by test evidence;
   CONTRIBUTING; version 0.1.0 (and possibly a PyPI release).
 - A fresh-clone quick start, verified on a second machine.
