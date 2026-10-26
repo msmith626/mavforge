@@ -84,6 +84,8 @@ def default_copter_params() -> dict[str, ParamSpec]:
         "AHRS_TRIM_X": (0.0, ParamType.REAL32),
         "AHRS_TRIM_Y": (0.0, ParamType.REAL32),
         "AHRS_ORIENTATION": (0, ParamType.INT8),
+        "ARSPD_TYPE": (0, ParamType.INT8),
+        "ARSPD_USE": (0, ParamType.INT8),
     }
 
 

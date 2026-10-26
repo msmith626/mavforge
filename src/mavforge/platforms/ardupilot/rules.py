@@ -458,6 +458,43 @@ def _flight_modes(identity: VehicleIdentity, p: ParamView) -> list[Finding]:
     ]
 
 
+def _airspeed_setup(identity: VehicleIdentity, p: ParamView) -> list[Finding]:
+    if identity.vehicle_family != "plane":
+        return []
+    arspd_type, arspd_use = p.require("ARSPD_TYPE", "ARSPD_USE")
+    evidence: dict[str, float | int | str | bool | None] = {
+        "ARSPD_TYPE": arspd_type,
+        "ARSPD_USE": arspd_use,
+    }
+    if arspd_type == 0 and arspd_use != 0:
+        return [
+            finding(
+                AIRSPEED,
+                FindingKind.WARNING,
+                "Airspeed control enabled without a sensor",
+                f"ARSPD_USE={arspd_use} but ARSPD_TYPE=0 (no sensor configured): ArduPilot "
+                "substitutes an estimated airspeed as if it were a real sensor reading for "
+                "speed-controlled modes, which the official docs warn can be erratic or "
+                "even dangerous. ArduPilot's own pre-arm check does not catch this: "
+                "AP_Arming::airspeed_checks() only examines sensors that are already "
+                "enabled, so a missing sensor is silently skipped, not rejected.",
+                evidence=evidence,
+                recommendation="Set ARSPD_USE=0 until a sensor is fitted and ARSPD_TYPE is "
+                "set, or fit one and set ARSPD_TYPE to match it.",
+                proposed_changes={"ARSPD_USE": 0},
+            )
+        ]
+    return [
+        finding(
+            AIRSPEED,
+            FindingKind.PASSED,
+            "Airspeed sensor use matches configuration",
+            f"ARSPD_TYPE={arspd_type}, ARSPD_USE={arspd_use}.",
+            evidence=evidence,
+        )
+    ]
+
+
 def _logging(identity: VehicleIdentity, p: ParamView) -> list[Finding]:
     (value,) = p.require("LOG_BACKEND_TYPE")
     if value == 0:
@@ -521,6 +558,7 @@ GPS = ParamRule("ardupilot.gps_configured", "GPS configuration", _gps_configured
 LOGGING = ParamRule("ardupilot.logging", "Onboard logging", _logging)
 FRAME = ParamRule("ardupilot.frame_class", "Frame class", _frame_class)
 FLIGHT_MODES = ParamRule("ardupilot.flight_modes", "Flight mode assignment", _flight_modes)
+AIRSPEED = ParamRule("ardupilot.airspeed_setup", "Airspeed sensor setup", _airspeed_setup)
 
 RULES: list[ParamRule] = [
     ARMING,
@@ -533,4 +571,5 @@ RULES: list[ParamRule] = [
     LOGGING,
     FRAME,
     FLIGHT_MODES,
+    AIRSPEED,
 ]

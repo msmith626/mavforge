@@ -122,6 +122,21 @@ def test_propose_fixes_builds_a_reviewable_plan(make_fake: FakeFactory) -> None:
     assert all(f.proposed_plan is None for f in battery_findings)
 
 
+def test_airspeed_used_without_a_sensor_proposes_disabling_it(make_fake: FakeFactory) -> None:
+    fake = make_fake(
+        mav_type=mavlink.MAV_TYPE_FIXED_WING,
+        params=default_copter_params()
+        | {"ARSPD_TYPE": (0, ParamType.INT8), "ARSPD_USE": (1, ParamType.INT8)},
+    )
+    with mavforge.connect(fake.connection_string) as vehicle:
+        report = vehicle.diagnose(prearm_wait=1.0, propose_fixes=True)
+    airspeed_finding = next(f for f in report.findings if f.check == "ardupilot.airspeed_setup")
+    assert airspeed_finding.kind is FindingKind.WARNING
+    plan = airspeed_finding.proposed_plan
+    assert plan is not None
+    assert [(c.name, c.requested) for c in plan.changes] == [("ARSPD_USE", 0)]
+
+
 def test_initialising_vehicle_is_flagged_even_without_uptime(make_fake: FakeFactory) -> None:
     """Seen on ArduPlane 4.6.2 just after reboot: mode INITIALISING and unanswered requests."""
     fake = make_fake(

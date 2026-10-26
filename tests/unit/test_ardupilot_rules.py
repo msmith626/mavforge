@@ -219,6 +219,30 @@ def test_gps_logging_and_frame() -> None:
 @pytest.mark.parametrize(
     ("params", "expected"),
     [
+        ({"ARSPD_TYPE": 0, "ARSPD_USE": 0}, FindingKind.PASSED),  # no sensor, not relied on
+        ({"ARSPD_TYPE": 2, "ARSPD_USE": 1}, FindingKind.PASSED),  # sensor fitted and used
+        ({"ARSPD_TYPE": 0, "ARSPD_USE": 1}, FindingKind.WARNING),  # estimate used as if real
+        ({"ARSPD_TYPE": 0, "ARSPD_USE": 2}, FindingKind.WARNING),  # same, throttle=0 variant
+    ],
+)
+def test_airspeed_setup(params: dict[str, Any], expected: FindingKind) -> None:
+    assert kinds(rules.AIRSPEED, params) == [expected]
+
+
+def test_airspeed_setup_not_applicable_to_copters() -> None:
+    assert kinds(rules.AIRSPEED, {}, "copter") == []  # no p.require() call at all
+
+
+def test_airspeed_setup_proposes_disabling_use_not_a_sensor_choice() -> None:
+    # Unlike a battery threshold, this fix needs no further judgment call: it's a
+    # complete, self-contained reversion to a safe state, same as logging's default.
+    result = run_rule(rules.AIRSPEED, ident("plane"), ParamView({"ARSPD_TYPE": 0, "ARSPD_USE": 1}))
+    assert result[0].proposed_changes == {"ARSPD_USE": 0}
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
         ({"FLTMODE_CH": 0}, FindingKind.SUSPECTED),  # disabled: never set up
         ({"FLTMODE_CH": 5}, FindingKind.PASSED),  # a channel is read (not: the 6 values are right)
         ({}, FindingKind.NOT_CHECKED),

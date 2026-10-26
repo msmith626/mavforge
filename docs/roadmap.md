@@ -229,14 +229,26 @@ accordingly, not treated as blockers:
   that changes the attack surface rather than extending existing machinery.
 - MCP over localhost HTTP (stdio only today).
 
-### Diagnostics (3, remaining)
+### Diagnostics (2, remaining)
+- **Findings that propose a parameter plan: done.** Built for M8b
+  (`propose_fixes`/`Finding.proposed_plan`), already in production use for the
+  `logging` and (as of 2026-10-26) `airspeed_setup` rules — the ones with a complete,
+  self-contained safe default. Rules needing operator judgment (battery thresholds)
+  deliberately don't propose one.
+- **Airspeed setup for planes: done (2026-10-26).** New rule `ardupilot.airspeed_setup`:
+  flags `ARSPD_USE` enabled with no sensor configured (`ARSPD_TYPE=0`) as a WARNING,
+  not a FAULT — confirmed from `AP_Arming::airspeed_checks()` source that ArduPilot's
+  own pre-arm check only examines sensors already marked `enabled`, so it silently
+  skips exactly this case rather than rejecting it. A second check found in the same
+  source file (`AIRSPEED_MIN too low`, against an internal `MIN_AIRSPEED_MIN`
+  constant) was deliberately left unimplemented: that constant's exact value wasn't
+  found in the fetched source, and this project doesn't encode a diagnose threshold
+  it can't verify. See `docs/research.md` ("Diagnostics rules").
 - More rules, each sourced from firmware or metadata:
   - servo and motor output functions;
-  - airspeed setup for planes;
   - serial-port protocol conflicts;
   - failsafe thresholds against battery capacity.
 - Optional comparison against a saved baseline inside the report.
-- Findings that propose a parameter plan (never applied automatically).
 
 ### Parameters (2, remaining)
 - MAVFTP `@PARAM/param.pck` bulk download, which is much faster than
