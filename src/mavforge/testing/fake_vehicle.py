@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import socket
+import struct
 import threading
 import time
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from types import TracebackType
 from typing import Self
 
 from mavforge.domain.models import ParamType
+from mavforge.protocol import ftp
 from mavforge.testing.fake_calibration import FakeCalibration, FakeCalibrationConfig
 from mavforge.transport.dialect import Message, mavlink
 
@@ -144,6 +146,12 @@ class FakeVehicleConfig:
     """PARAM_SET for these names is applied but not echoed."""
     drop_link_after_sets: int | None = None
     """Close the connection right after this many applied PARAM_SETs (link loss)."""
+    ftp_enabled: bool = True
+    """False: no FTP capability bit, and FILE_TRANSFER_PROTOCOL gets no reply at all -
+    models firmware without MAVFTP support."""
+    ftp_param_pck_fails: bool = False
+    """FTP is otherwise enabled, but OpenFileRO(@PARAM/param.pck) is NAKed (Fail) -
+    models a server that claims the capability but can't actually serve that file."""
     calibration: FakeCalibrationConfig = field(default_factory=FakeCalibrationConfig)
     uptime_s: float = 600.0
     """Seconds since 'boot' reported in SYSTEM_TIME when the fake starts."""
@@ -190,6 +198,7 @@ class FakeVehicle:
         self._lock = threading.Lock()
         self._received: list[Message] = []
         self._param_list_requests = 0
+        self._ftp_session: tuple[int, bytes] | None = None
         self.calibration = FakeCalibration(self, self.config.calibration)
         self._sets_applied = 0
         self._clients: list[socket.socket] = []
@@ -352,11 +361,15 @@ class FakeVehicle:
         cfg = self.config
         if msg_id == mavlink.MAVLINK_MSG_ID_AUTOPILOT_VERSION:
             major, minor, patch, kind = cfg.firmware
-            mav.autopilot_version_send(
+            capabilities = (
                 mavlink.MAV_PROTOCOL_CAPABILITY_MAVLINK2
                 | mavlink.MAV_PROTOCOL_CAPABILITY_PARAM_FLOAT
-                | mavlink.MAV_PROTOCOL_CAPABILITY_FTP
-                | mavlink.MAV_PROTOCOL_CAPABILITY_COMPASS_CALIBRATION,
+                | mavlink.MAV_PROTOCOL_CAPABILITY_COMPASS_CALIBRATION
+            )
+            if cfg.ftp_enabled:
+                capabilities |= mavlink.MAV_PROTOCOL_CAPABILITY_FTP
+            mav.autopilot_version_send(
+                capabilities,
                 (major << 24) | (minor << 16) | (patch << 8) | kind,
                 0,
                 0,
@@ -435,6 +448,8 @@ class FakeVehicle:
             self._handle_param_read(mav, msg)
         elif isinstance(msg, mavlink.MAVLink_param_set_message):
             self._handle_param_set(mav, msg)
+        elif isinstance(msg, mavlink.MAVLink_file_transfer_protocol_message):
+            self._handle_ftp(mav, msg)
 
     def _handle_command(
         self, mav: mavlink.MAVLink, msg: mavlink.MAVLink_command_long_message
@@ -549,6 +564,78 @@ class FakeVehicle:
                 -1,
                 mavlink.MAV_PARAM_ERROR_DOES_NOT_EXIST,
             )
+
+    def _handle_ftp(
+        self, mav: mavlink.MAVLink, msg: mavlink.MAVLink_file_transfer_protocol_message
+    ) -> None:
+        cfg = self.config
+        if not cfg.ftp_enabled:
+            return  # models firmware with no MAVFTP support: no reply at all
+        frame = ftp.decode_frame(bytes(msg.payload))
+        sender = (msg.get_srcSystem(), msg.get_srcComponent())
+
+        def reply(opcode: int, *, session: int = 0, data: bytes = b"") -> None:
+            # Real ArduPilot (GCS_FTP.cpp): reply.seq_number = request.seq_number + 1,
+            # not the same number as the request - confirmed against real SITL.
+            out = ftp.Frame(
+                frame.seq + 1, session, opcode, len(data), frame.opcode, 0, frame.offset, data
+            )
+            mav.file_transfer_protocol_send(0, *sender, ftp.encode_frame(out))
+
+        def nak(error: int, *, session: int = 0) -> None:
+            reply(ftp.OP_NAK, session=session, data=bytes([error]))
+
+        if frame.opcode == ftp.OP_OPEN_FILE_RO:
+            if frame.data.rstrip(b"\x00") != b"@PARAM/param.pck":
+                nak(ftp.NAK_FILE_NOT_FOUND)
+                return
+            if cfg.ftp_param_pck_fails:
+                nak(ftp.NAK_FAIL)
+                return
+            data = _encode_param_pack(self._param_snapshot())
+            with self._lock:
+                self._ftp_session = (1, data)
+            reply(ftp.OP_ACK, session=1, data=struct.pack("<I", len(data)))
+        elif frame.opcode == ftp.OP_READ_FILE:
+            with self._lock:
+                session = self._ftp_session
+            if session is None or frame.session != session[0]:
+                nak(ftp.NAK_INVALID_SESSION, session=frame.session)
+                return
+            _, data = session
+            if frame.offset >= len(data):
+                nak(ftp.NAK_EOF, session=frame.session)
+                return
+            chunk = data[frame.offset : frame.offset + min(frame.size, ftp.MAX_DATA)]
+            reply(ftp.OP_ACK, session=frame.session, data=chunk)
+        elif frame.opcode == ftp.OP_TERMINATE_SESSION:
+            with self._lock:
+                self._ftp_session = None
+            reply(ftp.OP_ACK, session=frame.session)
+        else:
+            nak(ftp.NAK_UNKNOWN_COMMAND, session=frame.session)
+
+
+_PCK_TYPE_CODES: dict[ParamType, tuple[int, str]] = {
+    ParamType.INT8: (1, "<b"),
+    ParamType.INT16: (2, "<h"),
+    ParamType.INT32: (3, "<i"),
+    ParamType.REAL32: (4, "<f"),
+}
+
+
+def _encode_param_pack(params: list[tuple[str, ParamSpec]]) -> bytes:
+    """Build an uncompressed param.pck from the fake vehicle's current parameters, for
+    FTP download tests. Real servers compress repeated name prefixes; this doesn't
+    need to, since the decoder's compression handling is already covered independently
+    (tests/unit/test_param_pack.py, built from hand-written bytes)."""
+    body = bytearray()
+    for name, (value, ptype) in params:
+        code, fmt = _PCK_TYPE_CODES[ptype]
+        body += bytes([code, (len(name) - 1) << 4])  # flags=0 (no default), common_len=0
+        body += name.encode("ascii") + struct.pack(fmt, round(value) if ptype.is_integer else value)
+    header = struct.pack("<HHH", 0x671B, len(params), len(params))
+    return header + bytes(body)
 
 
 FakeFactory = Callable[..., FakeVehicle]

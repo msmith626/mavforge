@@ -28,7 +28,7 @@ See [docs/mavproxy.md](docs/mavproxy.md).
 |---|---|---|---|---|
 | Identify vehicle (autopilot, firmware, git hash, board, capabilities, SITL detection) | `vehicle.info()` | `mavforge info` | `vehicle_info` | fake vehicle, ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
 | Status snapshot (armed, mode, sensors, pre-arm flag, battery, GPS, STATUSTEXT) | `vehicle.status()` | `mavforge status` | `vehicle_status` | fake vehicle, ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
-| Download all parameters, glob filter, gap recovery | `vehicle.params.list()` | `mavforge params list` | `params_list` | fake vehicle, ArduCopter 4.7.2 SITL (1369 params), ArduPlane 4.6.2 hardware |
+| Download all parameters, glob filter, gap recovery; prefers MAVFTP's packed `param.pck` (far fewer round trips) when the vehicle reports FTP support, falling back to `PARAM_REQUEST_LIST` on any FTP-specific failure | `vehicle.params.list()` | `mavforge params list` | `params_list` | fake vehicle, ArduCopter 4.7.2 SITL (1369 params), ArduPlane 4.6.2 hardware |
 | Read one parameter | `vehicle.params.get()` | `mavforge params get` | `params_get` | fake vehicle, ArduCopter 4.7.2 SITL |
 | Back up all parameters with vehicle identity (JSON, optional `.param` export) | `vehicle.params.backup()` | `mavforge params backup` | `params_backup` | fake vehicle, ArduCopter 4.7.2 SITL |
 | Diff vehicle vs a backup or `.param` file; diff two files offline | `vehicle.params.diff()`, `mavforge.diff_backups()` | `mavforge params diff` | `params_diff` | fake vehicle, ArduCopter 4.7.2 SITL |

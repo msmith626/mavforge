@@ -94,7 +94,9 @@ def test_diff_against_plain_param_file(fake: FakeVehicle, tmp_path: Path) -> Non
 
 
 def test_incomplete_backup_is_partial_and_marked(make_fake: FakeFactory) -> None:
-    fake = make_fake(withheld_param_indices={4})
+    # withheld_param_indices only affects PARAM_REQUEST_LIST (MAVFTP's param.pck is one
+    # monolithic transfer with no per-index concept); pin that path deliberately.
+    fake = make_fake(withheld_param_indices={4}, ftp_enabled=False)
     with mavforge.connect(fake.connection_string) as vehicle:
         result = vehicle.params.backup()
         diff = vehicle.params.diff(result.backup_id)

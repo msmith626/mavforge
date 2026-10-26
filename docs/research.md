@@ -368,6 +368,56 @@ These are the sources for the ArduPilot rules in `platforms/ardupilot/rules.py`.
   - On the stock ArduPlane 4.6.2 configuration it flagged 17 parameters. Nearly all were firmware defaults where 0 means "disabled" but falls outside the documented range (e.g. `AIRSPEED_STALL`, `FENCE_TOTAL`), or board-specific pin numbers.
   - That is too noisy for diagnostics. Range validation belongs at write time instead (planned).
 
+## MAVFTP bulk parameter download
+
+- **`FILE_TRANSFER_PROTOCOL` message and opcodes.** Per
+  [mavlink.io](https://mavlink.io/en/services/ftp.html): 12-byte header (`seq_number`
+  uint16, `session`, `opcode`, `size`, `req_opcode`, `burst_complete`, one padding
+  byte, `offset` uint32), up to 239 bytes of `data`. Opcodes used here: `OpenFileRO`=4,
+  `ReadFile`=5, `TerminateSession`=1, `ACK`=128, `NAK`=129 (`data[0]` is the error code;
+  `EOF`=6, `Fail`=1, `FileNotFound`=10, `InvalidSession`=4, `UnknownCommand`=7).
+  MAVForge implements sequential reads only, not burst reads: simpler and more
+  reliable to get right, at the cost of one round trip per 239-byte chunk instead of
+  pipelining - still far fewer round trips than one `PARAM_VALUE` per parameter.
+- **Sequence numbers: the spec and real ArduPilot disagree.** mavlink.io states "the
+  server replies with the same number as the request." **This is wrong for
+  ArduPilot.** `GCS_FTP.cpp::setup_reply()` (checked at tag `Copter-4.7.2`):
+  `reply.seq_number = request.seq_number + 1`. Found by writing the client strictly
+  to the documented spec, which then timed out against real ArduCopter 4.7.2 SITL
+  with *no visible error* - a raw pymavlink probe showed the ACK arriving correctly,
+  just with `seq = request_seq + 1`, silently discarded by the client's own
+  same-seq-only filter. The fake vehicle's FTP test double was built on the same wrong
+  assumption and had to be fixed too, since it "agreed with itself" either way - this
+  is exactly why the SITL layer of evidence exists, not just the fake vehicle.
+  [verified against real ArduCopter 4.7.2 SITL]
+- **`@PARAM/param.pck` binary format.** Per
+  [mavlink.io](https://mavlink.io/en/services/parameter_ftp.html): 6-byte header
+  (`magic` `0x671B`/no-defaults or `0x671C`/with-defaults, `num_params`,
+  `total_params`, all little-endian uint16), then entries: byte 0 low nibble = type
+  (1=INT8, 2=INT16, 3=INT32, 4=REAL32 - ArduPilot's internal codes, not
+  `MAV_PARAM_TYPE`), high nibble = flags (bit 0: a default value follows); byte 1 low
+  nibble = `common_len` (characters shared with the previous name), high nibble =
+  `name_len-1`; then the non-shared name suffix, then the value, then optionally the
+  default. `common_len + name_len` must not exceed 16. A zero first byte is block
+  padding (inserted so a value doesn't straddle a 239-byte transfer chunk) and must be
+  skipped one byte at a time. Unlike `PARAM_VALUE`'s "C cast" float encoding, INT32
+  entries here are genuine binary `int32_t` - no precision loss for large integers.
+  MAVForge only decodes (`protocol/param_pack.py`); encoding (needed only to upload, a
+  deliberately out-of-scope direction - see roadmap) was not built. [verified against
+  real ArduCopter 4.7.2 SITL: `param.pck` decodes to exactly the same name/value set
+  as `PARAM_REQUEST_LIST`, modulo parameters the ArduPilot adapter already treats as
+  volatile]
+- **Fallback, not a replacement.** `services/backup.py::fetch_all_params()` attempts
+  MAVFTP only when `AUTOPILOT_VERSION.capabilities` has the FTP bit (already surfaced
+  as `"FTP" in identity.protocol_capabilities`), and falls back to the existing
+  `PARAM_REQUEST_LIST` path (`protocol/params.py::fetch_all()`) on any FTP-specific
+  failure. Confirmed against real SITL that the fallback is *not* taken when FTP
+  works (a monkeypatch makes the fallback explode if it's ever called) - this is the
+  thing that was actually broken until the seq_number fix above, now confirmed fixed.
+- **Writes deliberately excluded.** `write_param()`'s PARAM_SET-with-read-back
+  verification is core to this project's safety model; MAVFTP's `WriteFile` path has
+  no equivalent per-parameter verification, so it was not built.
+
 ## Parameter writes
 
 - **Write path.** `PARAM_SET` carries the value as a float and the stored type; ArduPilot uses its stored type.

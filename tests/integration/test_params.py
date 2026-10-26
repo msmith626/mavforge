@@ -20,7 +20,9 @@ def test_list_returns_every_parameter_sorted(fake: FakeVehicle) -> None:
 
 
 def test_list_recovers_dropped_parameters(make_fake: FakeFactory) -> None:
-    fake = make_fake(drop_param_indices_once={0, 3, 10})
+    # drop_param_indices_once only affects PARAM_REQUEST_LIST; without pinning this,
+    # FTP would succeed trivially and never exercise the gap-recovery logic below.
+    fake = make_fake(drop_param_indices_once={0, 3, 10}, ftp_enabled=False)
     with mavforge.connect(fake.connection_string) as vehicle:
         result = vehicle.params.list()
     assert result.status is OperationStatus.SUCCEEDED

@@ -11,7 +11,12 @@ READ_ONLY_COMMANDS = {
     # (ArduPilot GCS_Common.cpp handle_command_run_prearm_checks).
     mavlink.MAV_CMD_RUN_PREARM_CHECKS,
 }
-READ_ONLY_MESSAGES = {"COMMAND_LONG", "PARAM_REQUEST_LIST", "PARAM_REQUEST_READ"}
+READ_ONLY_MESSAGES = {
+    "COMMAND_LONG",
+    "PARAM_REQUEST_LIST",
+    "PARAM_REQUEST_READ",
+    "FILE_TRANSFER_PROTOCOL",  # OpenFileRO/ReadFile/TerminateSession only - never opens for write
+}
 
 
 def test_read_operations_send_only_requests(fake: FakeVehicle) -> None:

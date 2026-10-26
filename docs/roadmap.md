@@ -286,9 +286,38 @@ accordingly, not treated as blockers:
   result), CLI, and MCP (including the path-traversal-refusal test, mirrored from
   `params_diff`'s existing one) layers.
 
-### Parameters (2, remaining)
-- MAVFTP `@PARAM/param.pck` bulk download, which is much faster than
-  `PARAM_REQUEST_LIST`, with the current method as a fallback.
+### Parameters (1, remaining)
+- **MAVFTP `@PARAM/param.pck` bulk download: done (2026-10-26).** New
+  `protocol/ftp.py` (sequential OpenFileRO/ReadFile/TerminateSession client) and
+  `protocol/param_pack.py` (pure decoder for the packed format). Wired into
+  `services/backup.py::fetch_all_params()`, now the single funnel used by
+  `build_backup()`, `params.list()` and `changes.py`'s by-name lookup: tries FTP when
+  the vehicle reports the capability, falls back to the existing
+  `PARAM_REQUEST_LIST` method (`protocol/params.py::fetch_all()`) on any FTP-specific
+  failure. Uploads deliberately excluded - `write_param()`'s per-parameter read-back
+  verification has no MAVFTP equivalent and is core to this project's safety model.
+
+  Found a real discrepancy between the mavlink.io spec and ArduPilot's actual
+  behavior: the client, built strictly to the documented spec, timed out against real
+  ArduCopter 4.7.2 SITL with no visible error. `GCS_FTP.cpp` (ArduPilot's own source)
+  confirmed why: `reply.seq_number = request.seq_number + 1`, not "the same number as
+  the request" as mavlink.io states. The fake vehicle's FTP test double had been
+  built on the same wrong assumption and had to be fixed too - exactly the scenario
+  the SITL layer of evidence exists for, since a fake vehicle can "agree with itself"
+  on a wrong assumption indefinitely. See `docs/research.md` ("MAVFTP bulk parameter
+  download") for the full writeup.
+
+  Tested at all three layers: `protocol/param_pack.py` against hand-built bytes from
+  the spec (unit), the FTP client against the fake vehicle's new FTP server
+  (multi-chunk, server-side failure, capability-absent, timeout), and - the
+  authoritative check for a binary format like this - against real ArduCopter 4.7.2
+  SITL: `param.pck` decodes to exactly the same parameter set `PARAM_REQUEST_LIST`
+  gets, and a monkeypatch confirms the fallback is never actually taken when FTP
+  works. Two pre-existing tests (`test_incomplete_backup_is_partial_and_marked`,
+  `test_list_recovers_dropped_parameters`) tested PARAM_REQUEST_LIST-specific
+  fault-injection knobs that have no MAVFTP equivalent; pinned to
+  `ftp_enabled=False` rather than taught to the fake FTP server, since an incomplete
+  FTP transfer isn't "partial data," it's an exception that triggers the fallback.
 - Diff against firmware defaults (`param.pck?withdefaults=1`).
 
 ### Calibration (4, remaining)

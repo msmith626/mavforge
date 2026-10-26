@@ -18,7 +18,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from mavforge.domain.errors import InvalidInputError, OperationTimeoutError
+from mavforge.domain.errors import InvalidInputError, OperationTimeoutError, ProtocolError
 from mavforge.domain.models import (
     BackupInfo,
     BackupListResult,
@@ -30,6 +30,7 @@ from mavforge.domain.models import (
 from mavforge.domain.outcomes import OperationStatus
 from mavforge.domain.values import format_value
 from mavforge.policy.audit import default_state_dir
+from mavforge.protocol import ftp, param_pack
 from mavforge.protocol import params as param_protocol
 from mavforge.services.catalog import PARAMS_BACKUP, run_operation
 from mavforge.services.info import mavforge_version
@@ -95,8 +96,28 @@ def render_param_file(backup: ParamBackup) -> str:
     return "\n".join(lines) + "\n"
 
 
+def fetch_all_params(session: Session) -> param_protocol.ParamDownload:
+    """Download the full parameter set, preferring MAVFTP's packed ``param.pck`` (far
+    fewer round trips than one PARAM_VALUE per parameter) when the vehicle reports FTP
+    support. Falls back to PARAM_REQUEST_LIST on any FTP-specific failure - a missing
+    virtual file, a firmware that only claims the capability, or anything else going
+    wrong with that specific transfer. A dropped link fails the same way either way,
+    so that isn't caught here - there is nothing a fallback could do about it.
+    """
+    if "FTP" in session.identity.protocol_capabilities:
+        try:
+            data = ftp.fetch_file(session.connection, *session.target, b"@PARAM/param.pck")
+            pack = param_pack.decode(data)
+            return param_protocol.ParamDownload(
+                params=dict(enumerate(pack.params)), total=pack.total_params
+            )
+        except (ProtocolError, OperationTimeoutError):
+            pass  # fall back below
+    return param_protocol.fetch_all(session.connection, *session.target)
+
+
 def build_backup(session: Session) -> ParamBackup:
-    download = param_protocol.fetch_all(session.connection, *session.target)
+    download = fetch_all_params(session)
     if not download.params:
         raise OperationTimeoutError("The vehicle sent no parameters")
     return ParamBackup(

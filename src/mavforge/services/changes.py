@@ -38,6 +38,7 @@ from mavforge.services import plan_store
 from mavforge.services.backup import (
     build_backup,
     default_backup_stem,
+    fetch_all_params,
     load_backup,
     write_new_default,
 )
@@ -89,7 +90,7 @@ def _current_values(session: Session, names: list[str]) -> dict[str, ParamValue]
             except ParamNotFoundError:
                 continue
         return found
-    download = param_protocol.fetch_all(session.connection, *session.target)
+    download = fetch_all_params(session)
     return {p.name: p for p in download.params.values()}
 
 

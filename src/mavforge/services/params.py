@@ -8,6 +8,7 @@ from mavforge.domain.errors import InvalidInputError, OperationTimeoutError
 from mavforge.domain.models import ParamGetResult, ParamListResult
 from mavforge.domain.outcomes import OperationStatus
 from mavforge.protocol import params as param_protocol
+from mavforge.services.backup import fetch_all_params
 from mavforge.services.catalog import PARAMS_GET, PARAMS_LIST, run_operation
 from mavforge.services.session import Session
 
@@ -25,7 +26,7 @@ def list_params(session: Session, pattern: str | None = None) -> ParamListResult
         pattern = _check_pattern(pattern)
 
     def run() -> ParamListResult:
-        download = param_protocol.fetch_all(session.connection, *session.target)
+        download = fetch_all_params(session)
         if not download.params:
             raise OperationTimeoutError("The vehicle sent no parameters")
         params = sorted(download.params.values(), key=lambda p: p.name)
