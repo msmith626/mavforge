@@ -1,5 +1,7 @@
 # MAVForge
 
+[![CI](https://github.com/msmith626/mavforge/actions/workflows/ci.yml/badge.svg)](https://github.com/msmith626/mavforge/actions/workflows/ci.yml)
+
 *Intelligent tools for flight controllers.*
 
 MAVForge is an open-source engineering toolkit for configuring, diagnosing and (soon)

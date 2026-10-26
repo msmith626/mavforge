@@ -159,8 +159,14 @@ accordingly, not treated as blockers:
   see M8a's hardware bullet.
 
 ### Release (6)
-- First CI run on GitHub. `.github/workflows/ci.yml` runs checks on Python 3.12–3.14
-  and a SITL job. It has never run on GitHub.
+- **CI on GitHub: already running, this item is stale.** `.github/workflows/ci.yml`
+  triggers on every push to `main`; checked directly against GitHub's own API
+  (2026-10-26), not assumed: it has run on every push since the first one this session
+  made (`179c842`, 2026-10-24) and passed every time — all three Python matrix legs
+  (3.12/3.13/3.14) plus the `sitl` job (building `docker/sitl` and running
+  `pytest -m sitl` on GitHub's own runners). This item was simply never checked before
+  being written down as undone. What's still genuinely open: no branch protection
+  requiring it to pass, and no status badge in this README.
 - SITL run on this Mac for the first time (2026-10-24), Python 3.14.7, under Colima
   (`--vm-type=vz --vz-rosetta`, native arm64 VM; Rosetta accelerates the `linux/amd64`
   SITL image rather than emulating a full x86_64 VM, which is far slower): all 17
