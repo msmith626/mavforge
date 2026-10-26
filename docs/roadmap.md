@@ -263,7 +263,14 @@ accordingly, not treated as blockers:
   inconsistency — implementing the simple version risks a false-positive FAULT on a
   legitimate setup, so it wasn't built. See `docs/research.md` ("Rejected rule:
   duplicate serial-port protocol").
-- Servo and motor output functions (still open — not yet investigated).
+- **Servo output functions: done (2026-10-26), narrower than the full doc list.**
+  `AP_Arming::servo_checks()` only examines channels with an assigned
+  `SERVOn_FUNCTION`, rejecting `SERVOn_MIN > SERVOn_TRIM` or `SERVOn_MAX < SERVOn_TRIM`
+  — same shape as the existing RC-channel rule, for outputs instead of inputs. Not
+  gated by vehicle family (`SRV_Channel` is universal). Deliberately left out: the
+  documented "no SERVOx_FUNCTION set to MotorX" check, which needs frame-specific
+  motor-count knowledge this rule doesn't have. See `docs/research.md` ("Diagnostics
+  rules").
 - Optional comparison against a saved baseline inside the report.
 
 ### Parameters (2, remaining)

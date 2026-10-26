@@ -86,6 +86,14 @@ def default_copter_params() -> dict[str, ParamSpec]:
         "AHRS_ORIENTATION": (0, ParamType.INT8),
         "ARSPD_TYPE": (0, ParamType.INT8),
         "ARSPD_USE": (0, ParamType.INT8),
+        "SERVO1_FUNCTION": (33, ParamType.INT8),  # Motor1
+        "SERVO1_MIN": (1000, ParamType.INT16),
+        "SERVO1_MAX": (2000, ParamType.INT16),
+        "SERVO1_TRIM": (1000, ParamType.INT16),
+        "SERVO2_FUNCTION": (34, ParamType.INT8),  # Motor2
+        "SERVO2_MIN": (1000, ParamType.INT16),
+        "SERVO2_MAX": (2000, ParamType.INT16),
+        "SERVO2_TRIM": (1000, ParamType.INT16),
     }
 
 

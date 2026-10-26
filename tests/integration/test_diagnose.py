@@ -137,6 +137,14 @@ def test_airspeed_used_without_a_sensor_proposes_disabling_it(make_fake: FakeFac
     assert [(c.name, c.requested) for c in plan.changes] == [("ARSPD_USE", 0)]
 
 
+def test_servo_output_range_fault_surfaces_through_diagnose(make_fake: FakeFactory) -> None:
+    fake = make_fake(params=default_copter_params() | {"SERVO1_MIN": (1500, ParamType.INT16)})
+    with mavforge.connect(fake.connection_string) as vehicle:
+        report = vehicle.diagnose(prearm_wait=1.0)
+    checks = by_check(report)
+    assert checks["ardupilot.servo_outputs"] == [FindingKind.FAULT]
+
+
 def test_initialising_vehicle_is_flagged_even_without_uptime(make_fake: FakeFactory) -> None:
     """Seen on ArduPlane 4.6.2 just after reboot: mode INITIALISING and unanswered requests."""
     fake = make_fake(

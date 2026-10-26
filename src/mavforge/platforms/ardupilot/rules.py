@@ -41,6 +41,7 @@ _COMPASS_ALWAYS_REQUIRED = {"copter", "heli", "blimp"}
 _COMPASS_LEARN_INFLIGHT = 3  # AP_Compass.h: learn_offsets_enabled() == LEARN_INFLIGHT
 
 _RC_DEFAULTS = (1100, 1900, 1500)  # RCn_MIN, RCn_MAX, RCn_TRIM firmware defaults
+_MAX_SERVO_CHANNELS = 16  # a generous upper bound; boards expose fewer, never checked beyond
 
 
 def _bits(value: float) -> list[str]:
@@ -291,6 +292,62 @@ def _rc_cal(identity: VehicleIdentity, p: ParamView) -> list[Finding]:
                 FindingKind.PASSED,
                 "Radio calibration present",
                 "Primary channels have calibrated, consistent ranges.",
+            )
+        )
+    return findings
+
+
+def _servo_outputs(identity: VehicleIdentity, p: ParamView) -> list[Finding]:
+    # AP_Arming::servo_checks() (AP_Arming.cpp) only checks a channel whose
+    # SERVOn_FUNCTION is assigned (> k_none, i.e. not 0) - an unassigned output isn't
+    # driving anything, so its MIN/MAX/TRIM are never examined by the firmware either.
+    seen_any = False
+    checked = 0
+    findings: list[Finding] = []
+    for n in range(1, _MAX_SERVO_CHANNELS + 1):
+        func_name = f"SERVO{n}_FUNCTION"
+        if not p.has(func_name):
+            continue
+        seen_any = True
+        (func,) = p.require(func_name)
+        if func == 0:
+            continue
+        checked += 1
+        lo, hi, trim = p.require(f"SERVO{n}_MIN", f"SERVO{n}_MAX", f"SERVO{n}_TRIM")
+        evidence: dict[str, float | int | str | bool | None] = {
+            func_name: func,
+            f"SERVO{n}_MIN": lo,
+            f"SERVO{n}_MAX": hi,
+            f"SERVO{n}_TRIM": trim,
+        }
+        if lo > trim or hi < trim:
+            findings.append(
+                finding(
+                    SERVO_OUTPUTS,
+                    FindingKind.FAULT,
+                    f"SERVO{n} range is inconsistent",
+                    f"SERVO{n}_MIN is above SERVO{n}_TRIM, or SERVO{n}_MAX is below it "
+                    f"(function {func}). ArduPilot's own servo pre-arm check rejects this.",
+                    evidence=evidence,
+                    recommendation=f"Fix SERVO{n}_MIN/MAX/TRIM so MIN <= TRIM <= MAX.",
+                )
+            )
+    if not seen_any:
+        return [
+            finding(
+                SERVO_OUTPUTS,
+                FindingKind.NOT_CHECKED,
+                "Servo output ranges: not checked",
+                "No SERVOn_FUNCTION parameters are present on this vehicle/firmware.",
+            )
+        ]
+    if not findings:
+        findings.append(
+            finding(
+                SERVO_OUTPUTS,
+                FindingKind.PASSED,
+                "Servo output ranges are consistent",
+                f"{checked} output(s) have an assigned function and MIN <= TRIM <= MAX.",
             )
         )
     return findings
@@ -573,6 +630,7 @@ ARMING = ParamRule("ardupilot.arming_checks", "Pre-arm check configuration", _ar
 ACCEL = ParamRule("ardupilot.accel_cal", "Accelerometer calibration", _accel_cal)
 COMPASS = ParamRule("ardupilot.compass_cal", "Compass calibration", _compass_cal)
 RC = ParamRule("ardupilot.rc_cal", "Radio calibration", _rc_cal)
+SERVO_OUTPUTS = ParamRule("ardupilot.servo_outputs", "Servo output ranges", _servo_outputs)
 THROTTLE_FS = ParamRule("ardupilot.throttle_failsafe", "RC/throttle failsafe", _throttle_failsafe)
 BATTERY = ParamRule(
     "ardupilot.battery_failsafe", "Battery monitoring and failsafe", _battery_failsafe
@@ -588,6 +646,7 @@ RULES: list[ParamRule] = [
     ACCEL,
     COMPASS,
     RC,
+    SERVO_OUTPUTS,
     THROTTLE_FS,
     BATTERY,
     GPS,

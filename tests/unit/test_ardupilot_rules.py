@@ -138,6 +138,47 @@ def test_rc_rule_follows_rcmap() -> None:
     assert titles(rules.RC, params) == ["RC5 (throttle) range is inconsistent"]
 
 
+def servo(
+    n: int, func: int, min_: int = 1000, max_: int = 2000, trim: int = 1000
+) -> dict[str, Any]:
+    return {
+        f"SERVO{n}_FUNCTION": func,
+        f"SERVO{n}_MIN": min_,
+        f"SERVO{n}_MAX": max_,
+        f"SERVO{n}_TRIM": trim,
+    }
+
+
+def test_servo_outputs_not_checked_when_absent() -> None:
+    assert kinds(rules.SERVO_OUTPUTS, {}) == [FindingKind.NOT_CHECKED]
+
+
+def test_servo_outputs_unassigned_channel_is_not_examined() -> None:
+    # function=0 (k_none): the firmware's own check skips it too, same as an unassigned
+    # SERVOn output never driving anything.
+    params = servo(1, func=0, min_=1900, max_=1100, trim=1500)  # would fault if checked
+    assert kinds(rules.SERVO_OUTPUTS, params) == [FindingKind.PASSED]
+
+
+def test_servo_outputs_min_above_trim_is_a_fault() -> None:
+    params = servo(3, func=33, min_=1200, trim=1000)  # min > trim
+    assert titles(rules.SERVO_OUTPUTS, params) == ["SERVO3 range is inconsistent"]
+    assert kinds(rules.SERVO_OUTPUTS, params) == [FindingKind.FAULT]
+
+
+def test_servo_outputs_max_below_trim_is_a_fault() -> None:
+    params = servo(7, func=4, max_=1400, trim=1500)  # max < trim
+    assert kinds(rules.SERVO_OUTPUTS, params) == [FindingKind.FAULT]
+
+
+def test_servo_outputs_only_the_bad_channel_is_reported() -> None:
+    # One consistent channel plus one inconsistent one: only the latter is a finding -
+    # a passing channel doesn't get its own PASSED when another already failed.
+    params = servo(1, func=33) | servo(2, func=34, min_=1300, trim=1000)
+    assert kinds(rules.SERVO_OUTPUTS, params) == [FindingKind.FAULT]
+    assert titles(rules.SERVO_OUTPUTS, params) == ["SERVO2 range is inconsistent"]
+
+
 @pytest.mark.parametrize(
     ("params", "expected"),
     [
