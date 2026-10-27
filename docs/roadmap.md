@@ -355,9 +355,13 @@ accordingly, not treated as blockers:
   oversight). See `docs/research.md` ("MAVFTP bulk parameter download") for the full
   writeup.
 
-### Calibration (4, remaining)
-- 6-position accelerometer calibration on hardware. It passes in SITL but hasn't been
-  run on a real board.
+### Calibration (3, remaining)
+- **6-position accelerometer calibration on hardware: done (2026-10-27).** Ran
+  `mavforge calibrate accel` against the real ArduPlane 4.6.2 (over WiFi this time,
+  not USB). All six positions (level, left, right, nose down, nose up, back/upside
+  down) accepted; vehicle reported `ACCELCAL_VEHICLE_POS_SUCCESS`; offsets and scale
+  read back non-zero and changed from their prior values. No code changes needed -
+  this item was purely the hardware-evidence gap SITL coverage already had.
 - Large-vehicle MagCal (`MAV_CMD_FIXED_MAG_CAL_YAW`); barometer calibration.
 - ESC calibration: deferred (high risk).
 
@@ -381,4 +385,4 @@ Bench board: ArduPlane 4.6.2 over USB, unconfigured airframe, indoors (no GPS fi
 | `diagnose --propose-fixes` (M8b) | passed; disabled `LOG_BACKEND_TYPE`, confirmed the plan builds only with the flag, applied and verified back to its original value | 2026-10-26 |
 | MAVFTP bulk param download | passed; 1117 params, exact match against `PARAM_REQUEST_LIST` (only `STAT_RUNTIME` differed, a known-volatile counter); **1.11s via FTP vs 16.28s via `PARAM_REQUEST_LIST`** on this real USB-serial link, about 15x; `backup()` confirmed to use FTP, not fall back | 2026-10-26 |
 | Diff against firmware defaults | passed; 76 of 1117 params differ from stock, cross-checked against a plain backup's live values (exact match); correctly surfaced `FLTMODE_CH` (default 8, current 6) as a deliberate change - the exact fix made earlier on this same vehicle | 2026-10-26 |
-| 6-position accelerometer calibration | not yet run | |
+| 6-position accelerometer calibration | passed, over WiFi; all six positions (level, left, right, nose down, nose up, back) accepted, `ACCELCAL_VEHICLE_POS_SUCCESS`, `INS_ACCOFFS_*`/`INS_ACCSCAL_*` read back non-zero and changed | 2026-10-27 |
