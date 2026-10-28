@@ -39,7 +39,7 @@ from mavforge.services.calibration.compass import CompassWorkflow
 from mavforge.services.calibration.flight_modes import FlightModeWorkflow
 from mavforge.services.calibration.orientation import OrientationWorkflow
 from mavforge.services.calibration.radio import RadioWorkflow
-from mavforge.services.calibration.simple import GyroWorkflow, LevelWorkflow
+from mavforge.services.calibration.simple import BaroWorkflow, GyroWorkflow, LevelWorkflow
 from mavforge.services.changes import same_vehicle_problems
 from mavforge.services.session import Session
 from mavforge.services.status import build_status
@@ -54,6 +54,7 @@ _NO_REQUEST = (
 WORKFLOWS: dict[CalibrationKind, Callable[[], Workflow]] = {
     CalibrationKind.GYRO: GyroWorkflow,
     CalibrationKind.LEVEL: LevelWorkflow,
+    CalibrationKind.BARO: BaroWorkflow,
     CalibrationKind.COMPASS: CompassWorkflow,
     CalibrationKind.ACCEL: AccelWorkflow,
     CalibrationKind.RADIO: RadioWorkflow,

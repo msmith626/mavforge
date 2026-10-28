@@ -549,6 +549,7 @@ class PlanListResult(_Model):
 class CalibrationKind(StrEnum):
     GYRO = "gyro"
     LEVEL = "level"
+    BARO = "baro"
     COMPASS = "compass"
     ACCEL = "accel"
     RADIO = "radio"

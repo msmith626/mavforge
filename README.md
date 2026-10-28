@@ -18,8 +18,9 @@ It does not replace them: there is no console, map, mission planning or flight c
 See [docs/mavproxy.md](docs/mavproxy.md).
 
 > **Status: pre-alpha (0.1.0.dev0).** Parameter changes work, behind a reviewed and
-> approved plan with read-back verification. Gyro, level, compass and 6-position accel
-> calibration work as verified state machines; see [docs/calibration.md](docs/calibration.md).
+> approved plan with read-back verification. Gyro, level, barometer, compass and
+> 6-position accel calibration work as verified state machines; see
+> [docs/calibration.md](docs/calibration.md).
 > Nothing MAVForge reports means a vehicle is safe to fly.
 
 ## What works today
@@ -37,7 +38,7 @@ See [docs/mavproxy.md](docs/mavproxy.md).
 | Setup status: ArduPilot's own first-time setup sequence as a checklist (done / needed / recommended / unknown / not_applicable per step), derived from `diagnose`; `next_step` names what to run next | `vehicle.setup_status()` | `mavforge setup` | `setup_status` | fake vehicle, ArduCopter 4.7.2 SITL |
 | List backups | `mavforge.list_backups()` | `mavforge params backups` | `params_backups` | fake vehicle |
 | Change parameters: plan (validated against firmware metadata), human approval, backup, write, read-back verification | `vehicle.params.plan()`, `mavforge.approve_plan()`, `vehicle.params.apply()` | `mavforge params set`, `params plan`, `approve`, `params apply`, `params plans` | `params_plan`, `params_apply`, `params_plans` (with `--allow-configure`) | fake vehicle (incl. rejected, clamped, ignored writes, link loss), ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
-| Calibrate: gyro, level, onboard compass, 6-position accelerometer (guided, approved, evidence-based success) | `vehicle.calibration.request()/start()/status()/confirm()/cancel()` | `mavforge calibrate gyro\|level\|compass\|accel\|list` | `calibration_procedures`, `calibration_request`, `calibration_start`, `calibration_status`, `calibration_cancel` (with `--allow-calibrate`; accel not via MCP) | fake vehicle, ArduCopter 4.7.2 SITL (all four), ArduPlane 4.6.2 hardware (compass, gyro, level) |
+| Calibrate: gyro, level, barometer, onboard compass, 6-position accelerometer (guided, approved, evidence-based success) | `vehicle.calibration.request()/start()/status()/confirm()/cancel()` | `mavforge calibrate gyro\|level\|baro\|compass\|accel\|list` | `calibration_procedures`, `calibration_request`, `calibration_start`, `calibration_status`, `calibration_cancel` (with `--allow-calibrate`; accel not via MCP) | fake vehicle, ArduCopter 4.7.2 SITL (all five), ArduPlane 4.6.2 hardware (compass, gyro, level, baro, accel) |
 | Radio (RC) calibration: guided stick sweep that proposes `RCn_MIN/MAX/TRIM` as a change plan | `vehicle.calibration.start_radio()`, then `approve_plan` and `params.apply` | `mavforge calibrate radio [--plan-only]` | not via MCP | fake vehicle, ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |
 | Board orientation check: three guided poses that find how the flight controller is mounted and propose `AHRS_ORIENTATION` as a change plan | `vehicle.calibration.start_orientation()`, then `approve_plan` and `params.apply` | `mavforge calibrate orientation [--plan-only]` | not via MCP | fake vehicle, ArduCopter 4.7.2 SITL (simulated rotated board), ArduPlane 4.6.2 hardware |
 | Flight mode assignment: sweeps the FLTMODE_CH switch to confirm each requested position is reachable, then proposes `FLTMODE1..FLTMODE6` as a change plan | `vehicle.calibration.start_flight_modes()`, then `approve_plan` and `params.apply` | `mavforge calibrate flight-modes FLTMODEn=VALUE ... [--plan-only]` | not via MCP | fake vehicle, ArduCopter 4.7.2 SITL, ArduPlane 4.6.2 hardware |

@@ -467,10 +467,22 @@ These are the sources for the ArduPilot rules in `platforms/ardupilot/rules.py`.
 
 These were checked against ArduCopter 4.7.2 SITL. The source was read at tag `Plane-4.6.2`.
 
-- **Gyro and level run synchronously.**
-  - Both run inside `MAV_CMD_PREFLIGHT_CALIBRATION`, with `EXPECT_DELAY_MS(30000)`, and the ACK comes only when they finish.
+- **Gyro, level and barometer calibration all run synchronously.**
+  - All three run inside `MAV_CMD_PREFLIGHT_CALIBRATION`, with `EXPECT_DELAY_MS(30000)`, and the ACK comes only when they finish.
   - Level calls `calibrate_gyros()` first. It returns `TEMPORARILY_REJECTED` within 5 s of a previous accelerometer calibration (`last_accel_cal_ms`).
-  - Both passed in SITL. [verified]
+  - Barometer: `param3=1.0` → `_handle_command_preflight_calibration_baro()` (`GCS_Common.cpp`,
+    tag `Copter-4.7.2`) → `AP::baro().update_calibration()` → `AP_Baro.cpp`, which calls
+    `sensors[i].ground_pressure.set(...)` (plain `.set()`, not `.set_and_save()`) for every
+    baro instance - the updated value is live and reads back immediately, but isn't
+    persisted across reboot the way a normal `set_and_save()` parameter would be. This is
+    consistent with `BARO{n}_GND_PRESS` already being in this project's `is_volatile_param`
+    patterns (`BARO?_GND_PRESS`), from before this calibration workflow existed. If an
+    airspeed sensor is enabled, the baro branch also starts an async airspeed calibration
+    task and returns `MAV_RESULT_IN_PROGRESS` for that part - not modelled here, since
+    MAVForge's workflow only needs the baro ACK, which arrives either way.
+  - All three passed in SITL. Barometer additionally run on real ArduPlane 4.6.2
+    hardware (one baro instance on this board): `BARO1_GND_PRESS` 102308.57 ->
+    102308.43, read back immediately as expected. [verified]
 - **Compass messages are not streamed to MAVForge.** Without stream configuration, `MAG_CAL_PROGRESS`/`MAG_CAL_REPORT` never arrived on the link. `MAV_CMD_REQUEST_MESSAGE` for 191/192 returns them. [verified]
 - **One report request returns every finished compass.** `Compass::send_mag_cal_report()` loops over all instances and sends one report per finished compass. A single request therefore yields up to three reports, beginning after the last one sent.
   - Taking only the first reply returned the same compass every time.

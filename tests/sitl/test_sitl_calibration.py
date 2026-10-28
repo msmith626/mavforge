@@ -80,6 +80,14 @@ def test_gyro_and_level(sitl_connection: str) -> None:
     assert set(level.result.params_after) == {"AHRS_TRIM_X", "AHRS_TRIM_Y"}
 
 
+def test_baro(sitl_connection: str) -> None:
+    with mavforge.connect(sitl_connection, timeout=60, policy=SIM_ONLY) as vehicle:
+        baro = run(vehicle, "baro")
+    assert baro.state is CalibrationState.SUCCEEDED, baro.result
+    assert baro.result is not None
+    assert "BARO1_GND_PRESS" in baro.result.params_after
+
+
 def test_compass_calibration_with_simulated_rotation(sitl_calibration_connection: str) -> None:
     with mavforge.connect(sitl_calibration_connection, timeout=60, policy=SIM_ONLY) as vehicle:
         time.sleep(5)

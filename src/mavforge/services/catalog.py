@@ -99,8 +99,8 @@ PARAMS_APPLY = OperationSpec(
 
 CALIBRATE = OperationSpec(
     "calibrate",
-    "Run an approved calibration (gyro, level, compass, 6-position accel) as a state "
-    "machine with evidence-based success.",
+    "Run an approved calibration (gyro, level, barometer, compass, 6-position accel) "
+    "as a state machine with evidence-based success.",
     Permission.CALIBRATE,
     True,
 )

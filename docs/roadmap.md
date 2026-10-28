@@ -355,14 +355,43 @@ accordingly, not treated as blockers:
   oversight). See `docs/research.md` ("MAVFTP bulk parameter download") for the full
   writeup.
 
-### Calibration (3, remaining)
+### Calibration (2, remaining)
 - **6-position accelerometer calibration on hardware: done (2026-10-27).** Ran
   `mavforge calibrate accel` against the real ArduPlane 4.6.2 (over WiFi this time,
   not USB). All six positions (level, left, right, nose down, nose up, back/upside
   down) accepted; vehicle reported `ACCELCAL_VEHICLE_POS_SUCCESS`; offsets and scale
   read back non-zero and changed from their prior values. No code changes needed -
   this item was purely the hardware-evidence gap SITL coverage already had.
-- Large-vehicle MagCal (`MAV_CMD_FIXED_MAG_CAL_YAW`); barometer calibration.
+- **Barometer calibration: done (2026-10-27).** Checked `GCS_Common.cpp`
+  (`_handle_command_preflight_calibration_baro`, tag `Copter-4.7.2`) directly:
+  `MAV_CMD_PREFLIGHT_CALIBRATION` with `param3=1`, synchronous, same shape as the
+  existing gyro/level workflows (`services/calibration/simple.py`), so it was added
+  there as a third `Workflow` rather than a new module. Updates
+  `BARO{1,2,3}_GND_PRESS` for however many baro instances exist, via `.set()` not
+  `.set_and_save()` - the firmware itself doesn't persist this across reboot, only
+  across the current session, which matches these params already being in this
+  project's `is_volatile_param` patterns (`BARO?_GND_PRESS`) from before this
+  workflow existed. New `CalibrationKind.BARO` fits the existing generic CLI/MCP/API
+  machinery with no new wiring beyond registering the workflow: `mavforge calibrate
+  baro`, `vehicle.calibration.start("baro")`, available over MCP (no human
+  confirmation steps needed, same as gyro/level). Tested fake-vehicle (success,
+  firmware-reported failure, "busy, retry" rejection), real ArduCopter 4.7.2 SITL,
+  and real ArduPlane 4.6.2 hardware (one baro instance on this board;
+  `BARO1_GND_PRESS` 102308.57 -> 102308.43, read back immediately). See
+  `docs/research.md` ("Calibration behaviour verified").
+- Large-vehicle MagCal (`MAV_CMD_FIXED_MAG_CAL_YAW`): scoped, deliberately not built
+  this round. `AP_Compass_Calibration.cpp::mag_cal_fixed_yaw()` (tag `Copter-4.7.2`)
+  confirmed it's synchronous and simple to wire up mechanically - the real question
+  isn't the MAVLink command, it's that it takes an operator-supplied heading
+  (`param1`, degrees) that MAVForge has no way to verify, unlike every other
+  calibration workflow here, which all derive their own truth from live sensor data.
+  A wrong heading silently produces a bad calibration (confirmed from source: the
+  WMM-predicted field is rotated by AHRS roll/pitch, which the device knows, and the
+  *operator-supplied* yaw, which it doesn't). It's also explicitly a coarse method
+  (zero diagonals/off-diagonals) meant only for vehicles too large to physically
+  rotate, which isn't this project's bench vehicle's situation - hardware evidence
+  for it would be somewhat artificial. Left for a future, explicitly-scoped pass
+  rather than building it on the back of this one's momentum.
 - ESC calibration: deferred (high risk).
 
 ## Hardware evidence
@@ -386,3 +415,4 @@ Bench board: ArduPlane 4.6.2 over USB, unconfigured airframe, indoors (no GPS fi
 | MAVFTP bulk param download | passed; 1117 params, exact match against `PARAM_REQUEST_LIST` (only `STAT_RUNTIME` differed, a known-volatile counter); **1.11s via FTP vs 16.28s via `PARAM_REQUEST_LIST`** on this real USB-serial link, about 15x; `backup()` confirmed to use FTP, not fall back | 2026-10-26 |
 | Diff against firmware defaults | passed; 76 of 1117 params differ from stock, cross-checked against a plain backup's live values (exact match); correctly surfaced `FLTMODE_CH` (default 8, current 6) as a deliberate change - the exact fix made earlier on this same vehicle | 2026-10-26 |
 | 6-position accelerometer calibration | passed, over WiFi; all six positions (level, left, right, nose down, nose up, back) accepted, `ACCELCAL_VEHICLE_POS_SUCCESS`, `INS_ACCOFFS_*`/`INS_ACCSCAL_*` read back non-zero and changed | 2026-10-27 |
+| Barometer calibration | passed, over USB; one baro instance on this board; `BARO1_GND_PRESS` 102308.57 -> 102308.43, read back immediately | 2026-10-27 |

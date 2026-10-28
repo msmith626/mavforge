@@ -24,8 +24,9 @@ POS_FAILED = 16777216
 class FakeCalibrationConfig:
     gyro_result: int = mavlink.MAV_RESULT_ACCEPTED
     level_result: int = mavlink.MAV_RESULT_ACCEPTED
+    baro_result: int = mavlink.MAV_RESULT_ACCEPTED
     command_delay_s: float = 0.2
-    """Time the synchronous gyro/level calibration takes before the ACK."""
+    """Time the synchronous gyro/level/baro calibration takes before the ACK."""
     mag_duration_s: float = 1.0
     mag_statuses: list[int] = field(default_factory=lambda: [4])
     """Final MAG_CAL_STATUS per compass (4 = SUCCESS). The length is the compass count."""
@@ -74,6 +75,11 @@ class FakeCalibration:
                     self.vehicle.set_param("AHRS_TRIM_X", 0.012, ParamType.REAL32)
                     self.vehicle.set_param("AHRS_TRIM_Y", -0.008, ParamType.REAL32)
                 self.ack(mav, msg, cfg.level_result)
+            elif int(msg.param3) == 1:
+                time.sleep(cfg.command_delay_s)
+                if cfg.baro_result == mavlink.MAV_RESULT_ACCEPTED:
+                    self.vehicle.set_param("BARO1_GND_PRESS", 101180.0, ParamType.REAL32)
+                self.ack(mav, msg, cfg.baro_result)
             elif int(msg.param5) == 1:
                 time.sleep(cfg.command_delay_s)  # gyro calibration runs first
                 self.ack(mav, msg, mavlink.MAV_RESULT_ACCEPTED)

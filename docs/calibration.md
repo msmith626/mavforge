@@ -58,8 +58,9 @@ needs a reboot, the result says so.
 |---|---|---|---|---|---|
 | Gyro | yes | success + failure | **passed** | **passed** on ArduPlane 4.6.2 (one IMU; offsets moved by under 0.0004 rad/s) | yes |
 | Level (AHRS trim) | yes | success + rejected | **passed** | **passed** on ArduPlane 4.6.2 (trim -0.12° roll, +0.23° pitch; board orientation confirmed by a tilt test) | yes |
+| Barometer | yes | success + failure + rejected | **passed** | **passed** on ArduPlane 4.6.2, one baro instance (`BARO1_GND_PRESS` 102308.57 -> 102308.43, read back immediately) | yes |
 | Compass (onboard) | yes, if `COMPASS_CALIBRATION` capability | success (1 and 3 compasses), per-compass failure, accept-without-save, cancel, timeout | **passed** (3 compasses, `calibration` model) | **passed**: ArduPlane 4.6.2, 1 compass, USB power only (2026-10-23) | yes |
-| Accelerometer, 6 positions | yes | success, failure, silence, cancel | **passed** (`calibration` model) | not yet | **no** |
+| Accelerometer, 6 positions | yes | success, failure, silence, cancel | **passed** (`calibration` model) | **passed** on ArduPlane 4.6.2, over WiFi (all six positions accepted, `ACCELCAL_VEHICLE_POS_SUCCESS`, offsets/scale read back changed) | **no** |
 | Radio (RC) | yes (GCS-side sweep, proposes a change plan) | success, apply after approval, unmoved/uncentred/throttle-high, reversed throttle, RCMAP, jitter, no receiver, receiver in failsafe, cancel, armed | **passed** (`RC_CHANNELS_OVERRIDE` from the test) | **passed** on ArduPlane 4.6.2 (Spektrum DX7s, 7 channels; result matched the existing calibration to within 2 us) | **no** |
 | Board orientation check | yes (three poses, proposes `AHRS_ORIENTATION` as a change plan) | correct, arrow right, upside down, wrong current setting, live tilt, too little tilt, shaking, wrong side, not square, custom rotation, no IMU data, cancel, permissions | **passed** (`SIM_IMU_ORIENT=2`: proposed 6, applied, re-check matched) | **passed** on ArduPlane 4.6.2, hand-held (0 matches, as confirmed by hand; heading within 5°, first pose 9° off level) | **no** |
 | Flight mode assignment | yes (sweeps `FLTMODE_CH`, proposes `FLTMODE1..6` as a change plan) | plan proposed + applied, band reached/not reached, disabled mode channel, unknown parameter, no request, cancel, permissions | **passed** (drives the real mode channel via `RC_CHANNELS_OVERRIDE`, same mechanism as radio's SITL test) | **passed**: ArduPlane 4.6.2, Spektrum DX7s — found `FLTMODE_CH` was pointed at a dead channel (the switch did nothing); corrected to the real one, then confirmed RTL/FBWA/MANUAL all reachable. Also found and fixed a CLI bug: live sweep progress was never rendered for this check | **no** |
@@ -91,6 +92,26 @@ Other autopilots use the generic adapter, which declares no calibrations.
 - **Limitation on QuadPlanes:** ArduPlane refuses with `Q_TRIM_PITCH` set; see the
   vehicle message.
 - **Cancel:** not possible.
+
+## Barometer
+
+- **Needs:** the vehicle disarmed and stationary at its take-off location.
+- **Sequence:** `PREFLIGHT_CALIBRATION` with p3=1.
+  - ArduPilot sets the current pressure as ground level for every baro instance
+    (`BARO1_GND_PRESS`, `BARO2_GND_PRESS`, `BARO3_GND_PRESS` as applicable) and ACKs
+    once done.
+  - This uses the firmware's `.set()`, not `.set_and_save()`: the new value is live
+    and reads back immediately, but (unlike a normal saved parameter) isn't
+    guaranteed to persist across a reboot on its own.
+- **Success:** ACK `ACCEPTED`, then `BARO{n}_GND_PRESS` is read back.
+- **Failure:**
+  - ACK `FAILED`: check the vehicle's messages.
+  - No ACK: reported as `unknown`.
+  - MAVForge also reports a generic "busy, wait and retry" hint on
+    `TEMPORARILY_REJECTED` (shared code with gyro/level, which do have a confirmed
+    5 s busy window); whether the baro branch itself can return that code wasn't
+    separately confirmed from source.
+- **Cancel:** not possible. It finishes in seconds.
 
 ## Compass (onboard)
 

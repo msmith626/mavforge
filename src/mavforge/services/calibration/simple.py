@@ -1,8 +1,8 @@
-"""Gyroscope and level (AHRS trim) calibration.
+"""Gyroscope, level (AHRS trim) and barometer calibration.
 
-ArduPilot runs both synchronously inside MAV_CMD_PREFLIGHT_CALIBRATION and only ACKs when
-done (GCS_Common.cpp, EXPECT_DELAY_MS(30000)), so the command is sent once with a long
-timeout and never retransmitted. Neither can be interrupted once started.
+ArduPilot runs all three synchronously inside MAV_CMD_PREFLIGHT_CALIBRATION and only
+ACKs when done (GCS_Common.cpp, EXPECT_DELAY_MS(30000)), so the command is sent once
+with a long timeout and never retransmitted. None can be interrupted once started.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from mavforge.transport.dialect import mavlink
 ACK_TIMEOUT = 35.0
 GYRO_PARAMS = [f"INS_GYR{n}OFFS_{a}" for n in ("", "2", "3") for a in "XYZ"]
 TRIM_PARAMS = ["AHRS_TRIM_X", "AHRS_TRIM_Y"]
+BARO_PARAMS = [f"BARO{n}_GND_PRESS" for n in ("1", "2", "3")]
 
 
 def preflight_command(ctx: WorkflowContext, params: list[float]) -> tuple[OperationStatus, str]:
@@ -116,6 +117,48 @@ class LevelWorkflow(Workflow):
             params_before=before,
             params_after=after,
             evidence=[f"PREFLIGHT_CALIBRATION(level) acknowledged {result}", "AHRS_TRIM read back"],
+        )
+
+
+class BaroWorkflow(Workflow):
+    kind = CalibrationKind.BARO
+
+    def procedure(self) -> CalibrationProcedure:
+        return CalibrationProcedure(
+            kind=self.kind,
+            title="Barometer calibration",
+            summary="Sets the current pressure as the ground-level (zero altitude) "
+            "reference for each barometer.",
+            preconditions=["Vehicle disarmed", "Vehicle stationary at its take-off location"],
+            human_steps=["Leave the vehicle untouched until the calibration finishes."],
+            changes_parameters=BARO_PARAMS,
+            typical_duration="a few seconds",
+            success_evidence="Vehicle acknowledges ACCEPTED; ground pressure read back.",
+            cancellation="Cannot be interrupted; it finishes within seconds.",
+            available_via_mcp=True,
+            supported=True,
+        )
+
+    def run(self, ctx: WorkflowContext) -> CalibrationResult:
+        before = ctx.read_params(BARO_PARAMS)
+        ctx.update(
+            state=CalibrationState.RUNNING,
+            instruction="Keep the vehicle still at its current location.",
+        )
+        status, result = preflight_command(ctx, [0, 0, 1, 0, 0, 0, 0])
+        if status is not OperationStatus.SUCCEEDED:
+            return _command_failure("Barometer calibration", status, result, before)
+        ctx.update(state=CalibrationState.VERIFYING, instruction=None)
+        after = ctx.read_params(list(before))
+        return CalibrationResult(
+            status=OperationStatus.SUCCEEDED,
+            summary="Barometer calibration completed; ground pressure updated.",
+            params_before=before,
+            params_after=after,
+            evidence=[
+                f"PREFLIGHT_CALIBRATION(baro) acknowledged {result}",
+                "Ground pressure read back",
+            ],
         )
 
 

@@ -487,7 +487,7 @@ _CLI_ONLY_CALIBRATIONS = {
 def _register_calibration_tools(server: MCPServer, provider: VehicleProvider) -> None:
     @server.tool(annotations=CREATES_LOCAL_FILE)
     def calibration_request(kind: CalibrationKind) -> CalibrationRequest:
-        """Create a request to run a calibration (gyro, level or compass). Does NOT start
+        """Create a request to run a calibration (gyro, level, barometer or compass). Does NOT start
         it. Explain the procedure (calibration_procedures) to the user first: they must
         be at the vehicle. Then call calibration_start with the returned plan_id.
         The 6-position accelerometer and radio calibrations, the orientation check, and

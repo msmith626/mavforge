@@ -93,6 +93,36 @@ def test_level_success(fake: FakeVehicle) -> None:
     assert st.result.params_after == {"AHRS_TRIM_X": 0.012, "AHRS_TRIM_Y": -0.008}
 
 
+# -- baro ---------------------------------------------------------------------------------
+
+
+def test_baro_success_with_read_back(fake: FakeVehicle) -> None:
+    with connect(fake) as vehicle:
+        st = run(vehicle, "baro")
+    assert st.state is CalibrationState.SUCCEEDED
+    assert st.result is not None
+    assert st.result.params_before["BARO1_GND_PRESS"] == pytest.approx(101325.0)
+    assert st.result.params_after["BARO1_GND_PRESS"] == pytest.approx(101180.0)
+
+
+def test_baro_failure_is_reported(make_fake: FakeFactory) -> None:
+    fake = cal_fake(make_fake, baro_result=mavlink.MAV_RESULT_FAILED)
+    with connect(fake) as vehicle:
+        st = run(vehicle, "baro")
+    assert st.state is CalibrationState.FAILED
+    assert st.result is not None
+    assert st.result.status is OperationStatus.FAILED
+
+
+def test_baro_rejected_explains_retry(make_fake: FakeFactory) -> None:
+    fake = cal_fake(make_fake, baro_result=mavlink.MAV_RESULT_TEMPORARILY_REJECTED)
+    with connect(fake) as vehicle:
+        st = run(vehicle, "baro")
+    assert st.result is not None
+    assert st.result.status is OperationStatus.REJECTED
+    assert "5 s" in st.result.summary
+
+
 # -- compass ----------------------------------------------------------------------------
 
 

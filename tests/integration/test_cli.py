@@ -309,6 +309,14 @@ def test_calibrate_gyro_cli(fake: FakeVehicle) -> None:
     assert "INS_GYROFFS_X" in stdout
 
 
+def test_calibrate_baro_cli(fake: FakeVehicle) -> None:
+    code, stdout, stderr = invoke("-c", fake.connection_string, "calibrate", "baro", "--yes")
+    assert code == ExitCode.OK, stderr
+    assert "Before you start" in stderr
+    assert "baro calibration: succeeded" in stdout
+    assert "BARO1_GND_PRESS" in stdout
+
+
 def test_calibrate_accel_cli_prompts_for_each_pose(fake: FakeVehicle) -> None:
     result = runner.invoke(
         app,
@@ -341,7 +349,16 @@ def test_calibrate_list_needs_no_vehicle() -> None:
     code, stdout, _ = invoke("--json", "calibrate", "list")
     assert code == ExitCode.OK
     kinds = [p["kind"] for p in json.loads(stdout)["procedures"]]
-    assert kinds == ["gyro", "level", "compass", "accel", "radio", "orientation", "flight_modes"]
+    assert kinds == [
+        "gyro",
+        "level",
+        "baro",
+        "compass",
+        "accel",
+        "radio",
+        "orientation",
+        "flight_modes",
+    ]
 
 
 class _GatedInput(io.BytesIO):

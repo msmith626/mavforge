@@ -96,6 +96,7 @@ def default_copter_params() -> dict[str, ParamSpec]:
         "SERVO2_MIN": (1000, ParamType.INT16),
         "SERVO2_MAX": (2000, ParamType.INT16),
         "SERVO2_TRIM": (1000, ParamType.INT16),
+        "BARO1_GND_PRESS": (101325.0, ParamType.REAL32),
     }
 
 
