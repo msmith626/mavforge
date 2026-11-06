@@ -177,7 +177,7 @@ accordingly, not treated as blockers:
   CONTRIBUTING; version 0.1.0 (and possibly a PyPI release).
 - A fresh-clone quick start, verified on a second machine.
 
-### Hardening (5)
+### Hardening (6)
 - **Recover from link loss *during* a long operation: re-scoped, partly done
   (2026-10-26).** Checked the actual current behavior before assuming the gap: both
   calibration (`operations.py`) and `apply_plan` already detect link loss cleanly and
@@ -228,6 +228,22 @@ accordingly, not treated as blockers:
   MCP-over-HTTP (below) actually ships — that's the one item left in this section
   that changes the attack surface rather than extending existing machinery.
 - MCP over localhost HTTP (stdio only today).
+- **Priority-ordered connection candidates with auto-reconnect fallback.** Raised from
+  real friction (2026-11-05): a vehicle reachable over both USB and WiFi today forces
+  the operator to restart the MCP server (`--connection`/`MAVFORGE_CONNECTION`) every
+  time they switch interfaces. `VehicleProvider` (`mcp/server.py`) and `connstr.py`
+  currently accept exactly one `ConnectionSpec`, retried as-is on every reconnect.
+  Scoped fix: let `--connection` repeat (ordered, highest priority first — e.g. USB
+  serial before WiFi UDP), and have `VehicleProvider.get()` try each candidate in
+  order, with a short per-candidate open-timeout, whenever it needs to (re)connect —
+  so a USB cable plugged back in gets picked up on the next reconnect with no restart.
+  The candidate list stays fully fixed by the operator at startup, same as today's
+  single connection string — no tool or agent chooses or sees it, preserving the
+  "operator-chosen link" property in [mcp-setup.md](mcp-setup.md#security-assumptions).
+  Known wrinkle: macOS serial device paths (e.g. `/dev/cu.usbmodemXXXX`) aren't always
+  stable across unplug/replug, so a literal fixed device path in the candidate list
+  isn't fully robust by itself — worth confirming behavior on reconnect rather than
+  assuming before this ships.
 
 ### Diagnostics (0, remaining)
 - **Findings that propose a parameter plan: done.** Built for M8b
