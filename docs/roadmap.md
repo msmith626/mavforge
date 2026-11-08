@@ -228,22 +228,42 @@ accordingly, not treated as blockers:
   MCP-over-HTTP (below) actually ships — that's the one item left in this section
   that changes the attack surface rather than extending existing machinery.
 - MCP over localhost HTTP (stdio only today).
-- **Priority-ordered connection candidates with auto-reconnect fallback.** Raised from
-  real friction (2026-11-05): a vehicle reachable over both USB and WiFi today forces
-  the operator to restart the MCP server (`--connection`/`MAVFORGE_CONNECTION`) every
-  time they switch interfaces. `VehicleProvider` (`mcp/server.py`) and `connstr.py`
-  currently accept exactly one `ConnectionSpec`, retried as-is on every reconnect.
-  Scoped fix: let `--connection` repeat (ordered, highest priority first — e.g. USB
-  serial before WiFi UDP), and have `VehicleProvider.get()` try each candidate in
-  order, with a short per-candidate open-timeout, whenever it needs to (re)connect —
-  so a USB cable plugged back in gets picked up on the next reconnect with no restart.
-  The candidate list stays fully fixed by the operator at startup, same as today's
-  single connection string — no tool or agent chooses or sees it, preserving the
-  "operator-chosen link" property in [mcp-setup.md](mcp-setup.md#security-assumptions).
-  Known wrinkle: macOS serial device paths (e.g. `/dev/cu.usbmodemXXXX`) aren't always
-  stable across unplug/replug, so a literal fixed device path in the candidate list
-  isn't fully robust by itself — worth confirming behavior on reconnect rather than
-  assuming before this ships.
+- **Human-selected vehicle link: discovery, elicited choice, identity-bound reconnect.**
+  Raised from real friction (2026-11-05): a vehicle reachable over both USB and WiFi
+  today forces the operator to restart the MCP server (`--connection`/
+  `MAVFORGE_CONNECTION`) every time they switch interfaces, and a fixed serial path
+  breaks when macOS renumbers `/dev/cu.usbmodemXXXX` on replug. `VehicleProvider`
+  (`mcp/server.py`) and `connstr.py` accept exactly one `ConnectionSpec`, retried as-is.
+  Re-scoped (2026-11-07) from a startup-fixed, priority-ordered candidate list to the
+  same pattern `params_apply` already uses for approval:
+  - **Discovery in the server, never from the agent.** Enumerate serial ports via
+    pyserial (already a dependency; match on USB VID/PID or serial number, not the
+    device path), listen briefly on `udpin:0.0.0.0:14550` for WiFi bridges, and probe
+    any network endpoints the operator listed at startup. Each candidate gets a short
+    heartbeat probe so the choice shows autopilot, vehicle type, firmware and sysid.
+  - **Elicited choice.** A no-argument `vehicle_connect` tool (callable by the agent,
+    e.g. when a tool reports no link or link loss) elicits an enum of the
+    server-discovered candidates. The human picks or declines; the agent never supplies
+    a connection string and cannot answer the elicitation.
+  - **Bind to the vehicle, not the link.** Remember the approved board by `uid`
+    (already checked by `apply_plan`, `changes.py`). Same `uid` on a different link
+    reconnects silently (with a notice); a different board, several, or no `uid`
+    re-prompts. This subsumes the old priority-order/auto-reconnect idea; a "prefer USB
+    when both are up" setting remains optional.
+  - **Guards.** No link switch while a calibration or `params_apply` is in flight.
+    Discovery is opt-in (e.g. `--discover`, alongside `--allow-configure`) since it
+    opens a UDP listener. `--connection` stays as the default/fallback for clients
+    without elicitation, plus a CLI selection path analogous to `mavforge approve`.
+  - **Wrinkles to verify on hardware.** Bluetooth SPP serial (e.g. the SpeedyBee) has
+    no USB VID/PID, so matching must fall back to heartbeat + `uid`; boards that don't
+    report `uid` can never reconnect silently.
+  - **Docs.** The "Operator-chosen link" assumption in
+    [mcp-setup.md](mcp-setup.md#security-assumptions) becomes "Human-chosen link: fixed
+    at startup or picked by the human, via elicitation, from server-discovered
+    candidates; no tool accepts a connection string."
+  - **First step:** a `mavforge discover` CLI command, run against real hardware over
+    USB, Bluetooth and WiFi, to confirm what can actually be detected before building
+    the MCP tool.
 
 ### Diagnostics (0, remaining)
 - **Findings that propose a parameter plan: done.** Built for M8b
