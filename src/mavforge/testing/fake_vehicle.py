@@ -119,6 +119,8 @@ class FakeVehicleConfig:
     autopilot: int = mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA
     firmware: tuple[int, int, int, int] = (4, 7, 1, 255)
     git_hash: str = "abcdef12"
+    uid: int = 0x0123456789ABCDEF
+    """Board unique ID reported in AUTOPILOT_VERSION.uid (rendered as 16 hex digits)."""
     simulated: bool = True
     armed: bool = False
     custom_mode: int = 0
@@ -384,7 +386,7 @@ class FakeVehicle:
                 [0] * 8,
                 0x1209,
                 0x5741,
-                0x0123456789ABCDEF,
+                cfg.uid,
             )
         elif msg_id == mavlink.MAVLINK_MSG_ID_SYS_STATUS:
             enabled = _SENSORS_PRESENT

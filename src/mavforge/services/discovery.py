@@ -21,7 +21,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -226,12 +226,14 @@ def discover(
     serial: bool = True,
     timeout: float = DEFAULT_PROBE_TIMEOUT,
     network_timeout: float = DEFAULT_NETWORK_TIMEOUT,
+    exclude: Collection[str] = (),
     ports: Iterable[PortInfo] | None = None,
     prober: Prober = probe_link,
     platform: str = sys.platform,
 ) -> DiscoveryResult:
     """Enumerate candidate links and probe each one. ``also`` holds operator-supplied
-    connection strings (validated); ``ports``, ``prober`` and ``platform`` are for tests."""
+    connection strings (validated); ``exclude`` lists links that must not be opened
+    (compared after normalisation); ``ports``, ``prober`` and ``platform`` are for tests."""
     extra = [Target(parse_connection_string(c), "operator") for c in also]
     targets: list[Target] = []
     skipped: list[str] = []
@@ -243,6 +245,10 @@ def discover(
         targets.append(Target(parse_connection_string(f"udpin:0.0.0.0:{udp_port}"), "udp"))
     seen = {str(t.spec) for t in targets}
     targets += [t for t in extra if str(t.spec) not in seen]
+    # Links another user holds (e.g. the MCP server's own current link) must not be
+    # probed: pymavlink opens them non-exclusively and would steal their traffic.
+    excluded = {str(parse_connection_string(c)) for c in exclude}
+    targets = [t for t in targets if str(t.spec) not in excluded]
     return DiscoveryResult(
         probe_timeout=timeout,
         network_timeout=network_timeout,

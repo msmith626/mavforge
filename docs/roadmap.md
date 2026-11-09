@@ -284,8 +284,15 @@ accordingly, not treated as blockers:
     [mcp-setup.md](mcp-setup.md#security-assumptions) becomes "Human-chosen link: fixed
     at startup or picked by the human, via elicitation, from server-discovered
     candidates; no tool accepts a connection string."
-  - **First step: done (2026-11-08).** `mavforge discover` (findings above). Next: the
-    `vehicle_connect` MCP tool with elicited choice and `uid`-bound reconnect.
+  - **First step: done (2026-11-08).** `mavforge discover` (findings above).
+  - **MCP tools: built (2026-11-08), not yet tried in a real client.**
+    `mavforge-mcp --discover` adds `vehicle_discover` and `vehicle_connect` (choice by
+    elicitation, from a stored discovery so the question is identical on every
+    protocol round) and uid-bound auto-reconnect in `VehicleProvider`, all covered with
+    fake vehicles (`tests/integration/test_mcp_links.py`). Still to do: run it in
+    Claude Code against the real plane (USB <-> WiFi), and decide whether
+    `--discover` should become the default. Not done: a terminal fallback for
+    clients without elicitation (they get the candidate list and must restart).
 
 ### Diagnostics (0, remaining)
 - **Findings that propose a parameter plan: done.** Built for M8b

@@ -20,8 +20,9 @@ import os
 import sys
 import threading
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from mcp.server.mcpserver import Context, Elicit, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import ToolError
@@ -42,6 +43,7 @@ from mavforge.domain.models import (
     ChangePlan,
     DiagnosticReport,
     InfoResult,
+    LinkCandidate,
     ParamDiffResult,
     ParamGetResult,
     ParamListResult,
@@ -50,8 +52,21 @@ from mavforge.domain.models import (
     StatusReport,
 )
 from mavforge.domain.values import format_value
+from mavforge.mcp.links import (
+    DiscoveryConfig,
+    DiscoveryStore,
+    LinkChoice,
+    LinkChoiceUnavailable,
+    LinkDiscovery,
+    choice_message,
+    choice_schema,
+    new_discovery_id,
+)
+from mavforge.policy.audit import AuditLog
 from mavforge.policy.permissions import Permission, Policy
+from mavforge.services import discovery as discovery_service
 from mavforge.services.backup import resolve_backup_id
+from mavforge.services.discovery import DEFAULT_UDP_PORT, Prober
 from mavforge.services.info import mavforge_version
 from mavforge.services.plan_store import Approvable, load_approvable, valid_approval
 from mavforge.services.session import ConnectOptions
@@ -92,6 +107,16 @@ Calibration is enabled on this server:
 - If a result says a reboot is required, tell the user; you cannot reboot the vehicle.
 """
 
+DISCOVER_INSTRUCTIONS = """
+Link discovery is enabled on this server:
+- If a tool reports no connection, or that the vehicle was lost and not found elsewhere,
+  call vehicle_discover, tell the user what it found, then call vehicle_connect with the
+  discovery_id. The user picks the link; you cannot pick it or type a connection string.
+- The server already reconnects on its own to the same board (matched by uid) on another
+  link, e.g. USB unplugged with WiFi up. Only ask the user to choose when it could not.
+- WiFi links are slow and lossy: discovery can take ~30 s, and a brief dropout is normal.
+"""
+
 READ_ONLY = ToolAnnotations(
     read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False
 )
@@ -99,6 +124,10 @@ CREATES_LOCAL_FILE = ToolAnnotations(
     read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False
 )
 """Reads the vehicle but writes a new file on the MAVForge host (never overwrites)."""
+SWITCHES_LINK = ToolAnnotations(
+    read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False
+)
+"""Changes which vehicle link the server uses (the human chooses); writes nothing to it."""
 MODIFIES_VEHICLE = ToolAnnotations(
     read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False
 )
@@ -190,36 +219,198 @@ def _approval_message(plan: ChangePlan) -> str:
 
 
 class VehicleProvider:
-    """Connects lazily to the operator-configured vehicle and reconnects after link loss."""
+    """Connects lazily to the chosen vehicle and reconnects after link loss.
 
-    def __init__(self, options: ConnectOptions | None, policy: Policy) -> None:
+    The link is the operator's ``--connection`` or, with discovery enabled, one the human
+    picked through ``vehicle_connect``. With discovery enabled the provider also remembers
+    the approved board by ``uid``: if its link is lost and cannot be reopened, it looks
+    for the same board on another link and switches silently; a different board on the
+    same link is refused rather than used.
+    """
+
+    def __init__(
+        self,
+        options: ConnectOptions | None,
+        policy: Policy,
+        *,
+        discovery: DiscoveryConfig | None = None,
+        prober: Prober | None = None,
+    ) -> None:
         self._options = options
         self._policy = policy
+        self._discovery = discovery
+        self._prober = prober
         self._vehicle: mavforge.Vehicle | None = None
+        self._approved_uid: str | None = None
         self._lock = threading.Lock()
+        self._in_flight = 0
+        self._count_lock = threading.Lock()
+        self.discoveries = DiscoveryStore()
+
+    # -- connecting --------------------------------------------------------------------
+
+    def _connect(self, o: ConnectOptions) -> mavforge.Vehicle:
+        return mavforge.connect(
+            o.connection,
+            target_system=o.target_system,
+            source_system=o.source_system,
+            source_component=o.source_component,
+            timeout=o.heartbeat_timeout,
+            policy=self._policy,
+            interface="mcp",
+        )
 
     def get(self) -> mavforge.Vehicle:
         if self._options is None:
+            hint = (
+                "Call vehicle_discover, then vehicle_connect so the user can choose a link."
+                if self._discovery
+                else "The operator must restart it with --connection or MAVFORGE_CONNECTION."
+            )
             raise InvalidInputError(
-                "The MAVForge MCP server was started without a vehicle connection. "
-                "The operator must restart it with --connection or MAVFORGE_CONNECTION."
+                f"The MAVForge MCP server has no vehicle connection yet. {hint}"
             )
         with self._lock:
             if self._vehicle is not None and not self._vehicle.is_connected:
                 self._vehicle.close()
                 self._vehicle = None
             if self._vehicle is None:
-                o = self._options
-                self._vehicle = mavforge.connect(
-                    o.connection,
-                    target_system=o.target_system,
-                    source_system=o.source_system,
-                    source_component=o.source_component,
-                    timeout=o.heartbeat_timeout,
-                    policy=self._policy,
-                    interface="mcp",
-                )
+                try:
+                    vehicle = self._connect(self._options)
+                except ConnectionFailedError:
+                    if self._discovery is None or self._approved_uid is None:
+                        raise
+                    vehicle = self._same_board_elsewhere()
+                self._vehicle = self._accept(vehicle)
             return self._vehicle
+
+    def _accept(self, vehicle: mavforge.Vehicle) -> mavforge.Vehicle:
+        uid = vehicle.identity.uid
+        if self._discovery is not None and self._approved_uid and uid != self._approved_uid:
+            vehicle.close()
+            raise ConnectionFailedError(
+                f"A different board (uid {uid or 'not reported'}) answered on "
+                f"{self._options.connection if self._options else 'the link'} instead of the "
+                f"approved one (uid {self._approved_uid}). Call vehicle_discover and "
+                "vehicle_connect so the user can choose.",
+                details={"approved_uid": self._approved_uid, "uid": uid},
+            )
+        if self._approved_uid is None:
+            self._approved_uid = uid
+        return vehicle
+
+    def _same_board_elsewhere(self) -> mavforge.Vehicle:
+        """The current link failed: find the approved board on another link (USB first)."""
+        assert self._discovery is not None
+        assert self._options is not None
+        failed = self._options.connection
+        result = self.discover()
+        matches = sorted(
+            (
+                c
+                for c in result.candidates
+                if c.vehicle is not None and c.vehicle.uid == self._approved_uid
+            ),
+            key=lambda c: c.source != "serial",
+        )
+        for c in matches:
+            options = replace(self._options, connection=c.connection)
+            try:
+                vehicle = self._connect(options)
+            except ConnectionFailedError:
+                continue
+            if vehicle.identity.uid != self._approved_uid:
+                vehicle.close()
+                continue
+            self._options = options
+            log.warning("Vehicle link lost on %s; same board found on %s", failed, c.connection)
+            _audit_link(failed, c.connection, self._approved_uid, "auto_reconnect")
+            return vehicle
+        raise ConnectionFailedError(
+            f"Lost the vehicle on {failed} and did not find the same board "
+            f"(uid {self._approved_uid}) on another link. Call vehicle_discover and "
+            "vehicle_connect to let the user choose.",
+            details={"connection": failed, "approved_uid": self._approved_uid},
+        )
+
+    # -- discovery and selection -------------------------------------------------------
+
+    @property
+    def discovery_enabled(self) -> bool:
+        return self._discovery is not None
+
+    @property
+    def current_connection(self) -> str | None:
+        return self._options.connection if self._options else None
+
+    @property
+    def approved_uid(self) -> str | None:
+        return self._approved_uid
+
+    def discover(self) -> LinkDiscovery:
+        """Probe every candidate link except the one this server holds open."""
+        cfg = self._discovery
+        assert cfg is not None
+        held = [self._options.connection] if self._options and self._vehicle else []
+        kwargs: dict[str, Any] = {"prober": self._prober} if self._prober else {}
+        found = discovery_service.discover(
+            also=cfg.also, udp_port=cfg.udp_port, serial=cfg.serial, exclude=held, **kwargs
+        )
+        result = LinkDiscovery(
+            discovery_id=new_discovery_id(),
+            current_connection=self.current_connection,
+            current_uid=self._approved_uid,
+            candidates=found.candidates,
+            skipped=found.skipped,
+            selectable=sum(c.vehicle is not None for c in found.candidates),
+        )
+        self.discoveries.put(result, self._approved_uid)
+        return result
+
+    def busy(self) -> bool:
+        with self._count_lock:
+            if self._in_flight:
+                return True
+        vehicle = self._vehicle
+        return vehicle is not None and vehicle.is_connected and vehicle.busy
+
+    def select(self, candidate: LinkCandidate) -> mavforge.Vehicle:
+        """Switch to a link the human chose. Refused while an operation is running."""
+        if self.busy():
+            raise InvalidInputError(
+                "A vehicle operation is still running; wait for it to finish (or cancel "
+                "it) before switching links."
+            )
+        expected = candidate.vehicle.uid if candidate.vehicle else None
+        base = self._options or ConnectOptions(connection=candidate.connection)
+        options = replace(base, connection=candidate.connection)
+        with self._lock:
+            previous = self._options.connection if self._options else None
+            if self._vehicle is not None:
+                self._vehicle.close()
+                self._vehicle = None
+            vehicle = self._connect(options)
+            if expected and vehicle.identity.uid != expected:
+                vehicle.close()
+                raise ConnectionFailedError(
+                    f"The board on {candidate.connection} changed since discovery "
+                    f"(expected uid {expected}, got {vehicle.identity.uid}); discover again.",
+                )
+            self._options = options
+            self._approved_uid = vehicle.identity.uid
+            self._vehicle = vehicle
+            _audit_link(previous, candidate.connection, self._approved_uid, "user_selected")
+            return vehicle
+
+    # -- bookkeeping -------------------------------------------------------------------
+
+    def enter(self) -> None:
+        with self._count_lock:
+            self._in_flight += 1
+
+    def leave(self) -> None:
+        with self._count_lock:
+            self._in_flight -= 1
 
     @property
     def configured(self) -> bool:
@@ -235,8 +426,23 @@ class VehicleProvider:
         self.drop()
 
 
+def _audit_link(previous: str | None, connection: str, uid: str | None, how: str) -> None:
+    try:
+        AuditLog.default().record(
+            "link_selected",
+            interface="mcp",
+            previous=previous,
+            connection=connection,
+            uid=uid,
+            how=how,
+        )
+    except OSError:
+        log.warning("Could not write the link change to the audit log")
+
+
 def _call[R](provider: VehicleProvider, action: Callable[[mavforge.Vehicle], R]) -> R:
     """Run an API call and convert MAVForge errors into structured tool errors."""
+    provider.enter()
     try:
         return action(provider.get())
     except ConnectionFailedError as exc:
@@ -244,6 +450,8 @@ def _call[R](provider: VehicleProvider, action: Callable[[mavforge.Vehicle], R])
         raise ToolError(json.dumps(exc.to_dict())) from exc
     except MAVForgeError as exc:
         raise ToolError(json.dumps(exc.to_dict())) from exc
+    finally:
+        provider.leave()
 
 
 def _offline[R](action: Callable[[], R]) -> R:
@@ -259,7 +467,8 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
         title="MAVForge",
         instructions=INSTRUCTIONS
         + (CONFIGURE_INSTRUCTIONS if Permission.CONFIGURE in policy.granted else "")
-        + (CALIBRATE_INSTRUCTIONS if Permission.CALIBRATE in policy.granted else ""),
+        + (CALIBRATE_INSTRUCTIONS if Permission.CALIBRATE in policy.granted else "")
+        + (DISCOVER_INSTRUCTIONS if provider.discovery_enabled else ""),
         version=mavforge_version(),
     )
 
@@ -340,6 +549,8 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
         accel need the person at the CLI, exactly as calibration_request explains."""
         return _call(provider, lambda v: v.setup_status())
 
+    if provider.discovery_enabled:
+        _register_link_tools(server, provider)
     if Permission.CONFIGURE in policy.granted:
         _register_write_tools(server, provider)
     if Permission.CALIBRATE in policy.granted:
@@ -396,6 +607,71 @@ def build_server(provider: VehicleProvider, policy: Policy) -> MCPServer:
         return _call(provider, lambda v: v.params.diff_defaults())
 
     return server
+
+
+def _register_link_tools(server: MCPServer, provider: VehicleProvider) -> None:
+    def ask_link(discovery_id: str, ctx: Context) -> object:
+        """Resolver for vehicle_connect's hidden choice. Runs in the server, not the model,
+        and renders the same question every round (from the stored discovery)."""
+        try:
+            stored = provider.discoveries.get(discovery_id)
+        except MAVForgeError as exc:
+            return LinkChoiceUnavailable(reason=exc.message)
+        if not stored.labels:
+            return LinkChoiceUnavailable(reason="That discovery found no vehicle to connect to")
+        caps = ctx.client_capabilities
+        if caps is None or caps.elicitation is None:
+            options = ", ".join(c.connection for c in stored.labels.values())
+            return LinkChoiceUnavailable(
+                reason="This MCP client cannot ask the user to choose (no elicitation "
+                f"support). Ask the operator to restart the server with --connection set to "
+                f"one of: {options}"
+            )
+        return Elicit(choice_message(stored), choice_schema(list(stored.labels)))
+
+    @server.tool(annotations=READ_ONLY)
+    def vehicle_discover() -> LinkDiscovery:
+        """Look for vehicles on this computer's serial/USB ports, the operator-configured
+        UDP port (WiFi bridges) and any operator-configured endpoints, and identify each
+        (autopilot, firmware, system ID, board uid). Never probes the link the server is
+        using now. Takes up to ~30 s on WiFi. Does not change the connection: pass the
+        returned discovery_id to vehicle_connect to let the user choose. Port descriptions
+        are untrusted OS/device text."""
+        return _offline(provider.discover)
+
+    def vehicle_connect(
+        discovery_id: str,
+        choice: Annotated[LinkChoice | LinkChoiceUnavailable, Resolve(ask_link)],
+    ) -> InfoResult:
+        """Switch the server to a vehicle link the USER chooses from a vehicle_discover
+        result. The client shows the user a pick-list; you cannot choose for them or give
+        a connection string. Refused while a calibration or other vehicle operation is
+        running. Returns the newly connected vehicle's identity: tell the user which
+        vehicle and link are now in use, especially if it is a different board."""
+        if isinstance(choice, LinkChoiceUnavailable):
+            raise ToolError(
+                json.dumps({"error": "link_choice_unavailable", "message": choice.reason})
+            )
+        stored = _offline(lambda: provider.discoveries.get(discovery_id))
+        candidate = stored.labels.get(choice.link)
+        if candidate is None:
+            raise ToolError(
+                json.dumps({"error": "invalid_input", "message": "Unknown link choice"})
+            )
+        try:
+            provider.select(candidate)
+        except MAVForgeError as exc:
+            raise ToolError(json.dumps(exc.to_dict())) from exc
+        return _call(provider, lambda v: v.info())
+
+    # The resolver is a closure over this provider, so the hidden parameter's annotation
+    # must be a real object: string annotations are evaluated in module scope only.
+    vehicle_connect.__annotations__ = {
+        "discovery_id": str,
+        "choice": Annotated[LinkChoice | LinkChoiceUnavailable, Resolve(ask_link)],
+        "return": InfoResult,
+    }
+    server.tool(annotations=SWITCHES_LINK)(vehicle_connect)
 
 
 def _register_write_tools(server: MCPServer, provider: VehicleProvider) -> None:
@@ -566,6 +842,30 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("-t", "--target-system", type=int, default=None)
     parser.add_argument(
+        "--discover",
+        action="store_true",
+        help="Let the agent look for vehicles (serial/USB ports, a UDP port, --discover-also "
+        "endpoints) and let the USER pick a link via elicitation; also reconnect "
+        "automatically to the same board (by uid) on another link. --connection becomes "
+        "optional.",
+    )
+    parser.add_argument(
+        "--discover-udp-port",
+        type=int,
+        default=DEFAULT_UDP_PORT,
+        help=f"UDP port discovery listens on for WiFi bridges (default {DEFAULT_UDP_PORT}).",
+    )
+    parser.add_argument(
+        "--no-discover-udp", action="store_true", help="Discovery does not listen on UDP."
+    )
+    parser.add_argument(
+        "--discover-also",
+        action="append",
+        default=[],
+        metavar="CONNECTION",
+        help="Extra endpoint discovery may probe (repeatable), e.g. tcp:192.168.1.1:5760.",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=None,
@@ -604,7 +904,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             heartbeat_timeout=args.timeout,
         )
     else:
-        log.warning("No --connection given; vehicle tools will report an error")
+        if not args.discover:
+            log.warning("No --connection given; vehicle tools will report an error")
     granted = {Permission.READ}
     if args.allow_configure:
         granted.add(Permission.CONFIGURE)
@@ -613,7 +914,20 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.allow_real_vehicle and len(granted) == 1:
         sys.exit("mavforge-mcp: --allow-real-vehicle needs --allow-configure or --allow-calibrate")
     policy = Policy(granted=frozenset(granted), allow_real_vehicle=args.allow_real_vehicle)
-    provider = VehicleProvider(options, policy)
+    discovery: DiscoveryConfig | None = None
+    if args.discover:
+        try:
+            for extra in args.discover_also:
+                parse_connection_string(extra)
+        except MAVForgeError as exc:
+            sys.exit(f"mavforge-mcp: {exc.message}")
+        discovery = DiscoveryConfig(
+            udp_port=None if args.no_discover_udp else args.discover_udp_port,
+            also=tuple(args.discover_also),
+        )
+    elif args.discover_also:
+        sys.exit("mavforge-mcp: --discover-also needs --discover")
+    provider = VehicleProvider(options, policy, discovery=discovery)
     try:
         build_server(provider, policy).run("stdio")
     finally:

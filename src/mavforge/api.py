@@ -223,6 +223,11 @@ class Vehicle:
         self.calibration = Calibration(session)
 
     @property
+    def busy(self) -> bool:
+        """True while a background calibration or observation workflow is still running."""
+        return calibration_ops.REGISTRY.has_running(self.session)
+
+    @property
     def identity(self) -> VehicleIdentity:
         return self.session.identity
 

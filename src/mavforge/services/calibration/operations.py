@@ -241,6 +241,13 @@ class OperationRegistry:
                 f"each step; run `mavforge calibrate {kind.value}` there instead."
             )
 
+    def has_running(self, session: Session) -> bool:
+        """Whether any operation on ``session`` has not finished yet."""
+        with self._lock:
+            return any(
+                not op.ctx.state.finished and op.ctx.session is session for op in self._ops.values()
+            )
+
     def _check_idle_and_disarmed(self, session: Session) -> None:
         with self._lock:
             if any(
