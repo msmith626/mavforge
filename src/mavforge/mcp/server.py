@@ -305,13 +305,17 @@ class VehicleProvider:
         assert self._options is not None
         failed = self._options.connection
         result = self.discover()
+        # Links whose probe already reported the approved uid come first (USB before
+        # network), then links where a vehicle answered but the probe got no uid (lossy
+        # WiFi often loses AUTOPILOT_VERSION): a full connect may still get it, and the
+        # uid is checked again below before anything is used.
         matches = sorted(
             (
                 c
                 for c in result.candidates
-                if c.vehicle is not None and c.vehicle.uid == self._approved_uid
+                if c.vehicle is not None and c.vehicle.uid in (self._approved_uid, None)
             ),
-            key=lambda c: c.source != "serial",
+            key=lambda c: (c.vehicle is not None and c.vehicle.uid is None, c.source != "serial"),
         )
         for c in matches:
             options = replace(self._options, connection=c.connection)

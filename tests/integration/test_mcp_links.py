@@ -7,11 +7,14 @@ import anyio
 from mcp import Client
 from mcp_types import ElicitResult
 
+from mavforge.domain.models import VehicleIdentity
 from mavforge.mcp.links import DiscoveryConfig
 from mavforge.mcp.server import VehicleProvider, build_server
 from mavforge.policy.permissions import Policy
+from mavforge.services.discovery import probe_link
 from mavforge.services.session import ConnectOptions
 from mavforge.testing.fake_vehicle import FakeFactory, FakeVehicle
+from mavforge.transport.connstr import ConnectionSpec
 
 LINK_TOOLS = {"vehicle_discover", "vehicle_connect"}
 
@@ -211,3 +214,32 @@ def test_a_different_board_on_the_approved_link_is_refused(fake: FakeVehicle) ->
         return await client.call_tool("vehicle_info", {})
 
     assert "different board" in error(run(provider, steps))["message"]
+
+
+def test_reconnect_tries_a_link_whose_probe_lost_the_uid(make_fake: FakeFactory) -> None:
+    """Lossy WiFi often drops AUTOPILOT_VERSION during the probe; the full connect that
+    follows may still get the uid, and is only used if it matches."""
+    usb, wifi = make_fake(), make_fake()
+
+    def lossy(spec: ConnectionSpec, timeout: float) -> VehicleIdentity:
+        identity = probe_link(spec, timeout)
+        return identity.model_copy(update={"uid": None})
+
+    provider = VehicleProvider(
+        ConnectOptions(connection=usb.connection_string),
+        Policy.read_only(),
+        discovery=DiscoveryConfig(udp_port=None, serial=False, also=(wifi.connection_string,)),
+        prober=lossy,
+    )
+
+    async def steps(client: Client) -> Any:
+        await client.call_tool("vehicle_info", {})
+        usb.stop()
+        result = await client.call_tool("vehicle_info", {})
+        if result.is_error:
+            result = await client.call_tool("vehicle_info", {})
+        return result
+
+    later = run(provider, steps)
+    assert not later.is_error, later.content
+    assert later.structured_content["link"]["connection"] == wifi.connection_string
