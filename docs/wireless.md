@@ -72,7 +72,8 @@ this board without new evidence that the firmware changed.**
    `SpeedyBee F405Wing` (open, no password); the WING MINI variant instead advertises
    `SpeedyBee eFLY-WIFI` / password `88888888`. The FC's module answers as the gateway
    (`192.168.1.1` on this unit).
-4. Connect: `mavforge -c udpin:0.0.0.0:14550 --timeout 20 info` (the Mac listens; the
+4. Connect: `mavforge -c udpin:0.0.0.0:14550 info` (UDP/TCP links default to a 20 s
+   heartbeat wait since 2026-11-08; the Mac listens; the
    module sends first, same as Mission Planner/QGC).
 
 **Hardware evidence (2026-10-23):** `info`, `status`, and a full parameter download —

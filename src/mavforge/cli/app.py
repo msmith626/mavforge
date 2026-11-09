@@ -139,7 +139,7 @@ def _global_options(
         typer.Option(
             min=0.1,
             help="Seconds to wait for a vehicle heartbeat "
-            "[default: 5 for serial, 10 for UDP/TCP links].",
+            "[default: 5 for serial, 20 for UDP/TCP links].",
         ),
     ] = None,
     json_output: Annotated[

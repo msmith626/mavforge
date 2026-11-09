@@ -49,7 +49,9 @@ def test_falls_back_to_a_non_autopilot1_component(make_fake: FakeFactory) -> Non
     """wait_for_vehicle prefers MAV_COMP_ID_AUTOPILOT1, but a vehicle that only ever
     announces a different component must still be usable, not time out."""
     fake = make_fake(component_id=2)
-    with mavforge.connect(fake.connection_string) as vehicle:
+    # The fallback is taken only once the heartbeat wait expires; pin it short rather
+    # than sitting out the 20 s network-link default.
+    with mavforge.connect(fake.connection_string, timeout=3.0) as vehicle:
         assert vehicle.identity.component_id == 2
         assert vehicle.identity.system_id == 1
 

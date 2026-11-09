@@ -21,10 +21,11 @@ from mavforge.transport.dialect import Message, enum_name, mavlink
 
 HEARTBEAT_TIMEOUT = 5.0
 """Default heartbeat wait on serial links."""
-NETWORK_HEARTBEAT_TIMEOUT = 10.0
+NETWORK_HEARTBEAT_TIMEOUT = 20.0
 """Default heartbeat wait on UDP/TCP links. WiFi bridges are lossy: on real hardware
 (2026-11-08) a SpeedyBee F405 WING's WiFi averaged ~47 msg/s but went silent for up to
-5.1 s, so a 5 s wait regularly reported no vehicle."""
+5.1 s, and a freshly opened UDP listener took 3.6-13.6 s to hear its first packet
+(macOS, -32 dBm signal), so 5 s and even 10 s waits regularly reported no vehicle."""
 SERIAL_IDENTIFY_RETRIES = 1
 NETWORK_IDENTIFY_RETRIES = 4
 """AUTOPILOT_VERSION re-requests on network links. Without them a lossy link often

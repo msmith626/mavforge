@@ -297,7 +297,7 @@ def connect(
 ) -> Vehicle:
     """Connect, wait for a vehicle heartbeat, and identify the vehicle.
 
-    ``timeout`` is the heartbeat wait; None uses the link default (5 s serial, 10 s
+    ``timeout`` is the heartbeat wait; None uses the link default (5 s serial, 20 s
     UDP/TCP, where AUTOPILOT_VERSION is also re-requested more often).
 
     ``policy`` defaults to read-only. ``audit`` defaults to the per-user audit log

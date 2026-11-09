@@ -265,7 +265,11 @@ accordingly, not treated as blockers:
       probe with one identity retry missed the vehicle or its `uid` about half the
       time. Network probes now wait 10 s with 4 identity retries: 5/5 full identities,
       7.8-14 s each. Reconnect logic must tolerate WiFi dropouts (don't treat a short
-      silence as "vehicle gone" or re-prompt on every blip).
+      silence as "vehicle gone" or re-prompt on every blip). Three 60 s captures then
+      showed a fresh UDP listener waits 3.6-13.6 s for its first packet, with silences
+      up to 40 s, at -32 dBm and whether or not MAVForge sends traffic; so every connect
+      (not just discovery) now defaults to 20 s on network links and 4 AUTOPILOT_VERSION
+      retries. A known SpeedyBee F405 WING WiFi weakness; not pursued further.
     - macOS Local Network privacy silently blocked Python (`No route to host` on TCP,
       no UDP received) until allowed in System Settings; now hinted in both
       `open_failure_hint` and discovery output.

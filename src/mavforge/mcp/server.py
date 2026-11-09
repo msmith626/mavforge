@@ -569,7 +569,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--timeout",
         type=float,
         default=None,
-        help="Heartbeat wait in seconds (default: 5 for serial, 10 for UDP/TCP links).",
+        help="Heartbeat wait in seconds (default: 5 for serial, 20 for UDP/TCP links).",
     )
     parser.add_argument(
         "--allow-configure",
