@@ -83,6 +83,14 @@ unstable and prone to stalling partway through a parameter download; that was no
 reproduced here, plausibly because testing was at close (desk) range against
 SpeedyBee's own quoted 10–20 m limit.
 
+**Power it from the battery, not just USB (2026-11-08).** On USB power alone the WiFi
+link was close to unusable: about 2 MAVLink messages/s, first packets taking up to 20 s,
+and the module intermittently unreachable (`Host is down`). With the flight battery
+connected, the same 60 s capture gave about 11 messages/s with the first packet at
+0.7 s, and discovery got the full identity (board uid) again. Likely the WiFi module's
+transmit current is more than a computer's USB port leaves over after the FC and its
+peripherals; we didn't measure it. **Take the props off before connecting the battery.**
+
 **Trade-offs to know about:**
 - **Range is short** — this is a bench/pad-configuration link, not in-flight telemetry.
   Use a SiK radio or an ESP32 `mavesp8266` bridge on the `UART4` telemetry pads for
