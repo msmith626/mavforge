@@ -137,7 +137,8 @@ class LinkCandidate(_Model):
 
 class DiscoveryResult(_Model):
     status: OperationStatus = OperationStatus.SUCCEEDED
-    probe_timeout: float
+    probe_timeout: float = Field(description="Heartbeat wait for serial links, seconds.")
+    network_timeout: float = Field(description="Heartbeat wait for network links, seconds.")
     candidates: list[LinkCandidate]
     skipped: list[str] = Field(
         default_factory=list,

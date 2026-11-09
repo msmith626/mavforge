@@ -52,6 +52,12 @@ def open_failure_hint(spec: ConnectionSpec, exc: Exception, *, platform: str = s
     deterministic, OS-independent results (CI runs Linux; a contributor's machine may not).
     """
     if not spec.is_serial:
+        if platform == "darwin" and "No route to host" in str(exc):
+            return (
+                ". On macOS this is often the Local Network privacy setting: allow "
+                "Python (or your terminal) in System Settings > Privacy & Security > "
+                "Local Network, then try again"
+            )
         return ""
     text = str(exc)
     # Checked before the generic "could not open port" match below: pyserial's message

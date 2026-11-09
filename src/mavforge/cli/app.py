@@ -55,7 +55,11 @@ from mavforge.domain.outcomes import OperationStatus, exit_code_for
 from mavforge.domain.values import format_value
 from mavforge.policy.permissions import Policy
 from mavforge.services.calibration.operations import procedures as calibration_procedures
-from mavforge.services.discovery import DEFAULT_PROBE_TIMEOUT, DEFAULT_UDP_PORT
+from mavforge.services.discovery import (
+    DEFAULT_NETWORK_TIMEOUT,
+    DEFAULT_PROBE_TIMEOUT,
+    DEFAULT_UDP_PORT,
+)
 from mavforge.transport.connection import DEFAULT_SOURCE_COMPONENT, DEFAULT_SOURCE_SYSTEM
 
 EXIT_CODES_HELP = (
@@ -652,7 +656,10 @@ def status(ctx: typer.Context) -> None:
 
 
 def render_discovery(r: DiscoveryResult) -> None:
-    table = Table(title=f"Links probed ({r.probe_timeout:g}s heartbeat wait)")
+    table = Table(
+        title="Links probed (heartbeat wait: "
+        f"serial {r.probe_timeout:g}s, network {r.network_timeout:g}s)"
+    )
     for col in ("Connection", "Result", "Vehicle", "Board uid", "Port"):
         table.add_column(col)
     for c in r.candidates:
@@ -680,7 +687,9 @@ def render_discovery(r: DiscoveryResult) -> None:
         )
     out.print(table)
     for c in r.candidates:
-        if c.detail and c.outcome.value not in ("vehicle", "no_heartbeat"):
+        if c.detail and (
+            c.outcome.value not in ("vehicle", "no_heartbeat") or "Local Network" in c.detail
+        ):
             out.print(safe(f"  {c.connection}: {c.detail}"), style="dim")
     for s in r.skipped:
         out.print(safe(f"  skipped {s}"), style="dim")
@@ -703,8 +712,12 @@ def discover(
         bool, typer.Option("--no-serial", help="Do not probe serial ports.")
     ] = False,
     probe_timeout: Annotated[
-        float, typer.Option(min=0.5, help="Seconds to wait for a heartbeat on each link.")
+        float, typer.Option(min=0.5, help="Seconds to wait for a heartbeat on serial links.")
     ] = DEFAULT_PROBE_TIMEOUT,
+    network_timeout: Annotated[
+        float,
+        typer.Option(min=0.5, help="Seconds to wait for a heartbeat on UDP/TCP links (lossy)."),
+    ] = DEFAULT_NETWORK_TIMEOUT,
 ) -> None:
     """Find vehicles: probe serial ports, a UDP port and any --also links (no -c needed).
 
@@ -718,6 +731,7 @@ def discover(
             udp_port=None if no_udp else udp_port,
             serial=not no_serial,
             timeout=probe_timeout,
+            network_timeout=network_timeout,
         ),
         render_discovery,
     )

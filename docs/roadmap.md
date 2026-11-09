@@ -254,16 +254,34 @@ accordingly, not treated as blockers:
     Discovery is opt-in (e.g. `--discover`, alongside `--allow-configure`) since it
     opens a UDP listener. `--connection` stays as the default/fallback for clients
     without elicitation, plus a CLI selection path analogous to `mavforge approve`.
-  - **Wrinkles to verify on hardware.** Bluetooth SPP serial (e.g. the SpeedyBee) has
-    no USB VID/PID, so matching must fall back to heartbeat + `uid`; boards that don't
-    report `uid` can never reconnect silently.
+  - **Hardware findings (2026-11-08, `mavforge discover`, SpeedyBee F405 WING /
+    ArduPlane 4.6.2).**
+    - USB: found in ~3 s. The USB serial number (`33001C001351343033343935`) equals
+      the board `uid` minus zero padding, and VID:PID `1209:5741` matches
+      AUTOPILOT_VERSION, so a renumbered `/dev/cu.usbmodemXXXX` can be recognised from
+      the port listing alone, before opening it.
+    - WiFi (`udpin:0.0.0.0:14550`): same `uid` as USB, so USB <-> WiFi silent reconnect
+      is viable. But the link is lossy (~47 msg/s with silences up to 5.1 s): a 4 s
+      probe with one identity retry missed the vehicle or its `uid` about half the
+      time. Network probes now wait 10 s with 4 identity retries: 5/5 full identities,
+      7.8-14 s each. Reconnect logic must tolerate WiFi dropouts (don't treat a short
+      silence as "vehicle gone" or re-prompt on every blip).
+    - macOS Local Network privacy silently blocked Python (`No route to host` on TCP,
+      no UDP received) until allowed in System Settings; now hinted in both
+      `open_failure_hint` and discovery output.
+    - Bluetooth SPP (`/dev/cu.SpeedyBeeF405Wing-SPP`, no USB VID/PID) only reported
+      `Device not configured`; the port also comes and goes between runs. Not yet seen
+      working; matching there would have to rely on heartbeat + `uid`.
+    - pymavlink opens serial non-exclusively and binds UDP with `SO_REUSEADDR`, so a
+      probe can steal traffic from a program already on that link. The MCP tool must
+      never probe the link the server itself holds.
+    - Arming the vehicle appeared to drop WiFi until a power cycle; unconfirmed.
   - **Docs.** The "Operator-chosen link" assumption in
     [mcp-setup.md](mcp-setup.md#security-assumptions) becomes "Human-chosen link: fixed
     at startup or picked by the human, via elicitation, from server-discovered
     candidates; no tool accepts a connection string."
-  - **First step:** a `mavforge discover` CLI command, run against real hardware over
-    USB, Bluetooth and WiFi, to confirm what can actually be detected before building
-    the MCP tool.
+  - **First step: done (2026-11-08).** `mavforge discover` (findings above). Next: the
+    `vehicle_connect` MCP tool with elicited choice and `uid`-bound reconnect.
 
 ### Diagnostics (0, remaining)
 - **Findings that propose a parameter plan: done.** Built for M8b

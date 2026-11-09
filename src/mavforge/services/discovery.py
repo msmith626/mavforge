@@ -33,6 +33,11 @@ from mavforge.transport.connection import MavlinkConnection
 from mavforge.transport.connstr import ConnectionSpec, parse_connection_string
 
 DEFAULT_PROBE_TIMEOUT = 4.0
+DEFAULT_NETWORK_TIMEOUT = 10.0
+"""WiFi bridges are lossy: on real hardware (2026-11-08) a SpeedyBee F405 WING over a
+WiFi bridge averaged ~47 msg/s but went silent for up to 5.1 s, so a serial-length wait
+regularly missed the vehicle or its AUTOPILOT_VERSION reply."""
+NETWORK_IDENTIFY_RETRIES = 4
 DEFAULT_UDP_PORT = 14550
 
 # macOS ports that are always present and never a flight controller.
@@ -102,12 +107,14 @@ def serial_targets(
 
 
 def probe_link(spec: ConnectionSpec, timeout: float) -> VehicleIdentity:
-    """Open ``spec``, wait for an autopilot heartbeat, identify it, and close."""
+    """Open ``spec``, wait for an autopilot heartbeat, identify it, and close. Network
+    links get extra identity retries: a missing ``uid`` defeats reconnect matching."""
     conn = MavlinkConnection.open(spec)
     try:
         heartbeat, seen = wait_for_vehicle(conn, None, timeout)
         adapter = select_adapter(heartbeat)
-        return identify(conn, heartbeat, adapter, seen, request_timeout=1.5)
+        retries = 1 if spec.is_serial else NETWORK_IDENTIFY_RETRIES
+        return identify(conn, heartbeat, adapter, seen, request_timeout=1.5, retries=retries)
     finally:
         conn.close()
 
@@ -148,7 +155,9 @@ def _candidate(
     )
 
 
-def _probe_all(targets: Sequence[Target], timeout: float, prober: Prober) -> list[LinkCandidate]:
+def _probe_all(
+    targets: Sequence[Target], timeouts: Sequence[float], prober: Prober
+) -> list[LinkCandidate]:
     """Probe every target in parallel. Threads are daemons: an open() that hangs (macOS
     Bluetooth can) is reported as ``open_timeout`` rather than blocking exit."""
     results: list[LinkCandidate | None] = [None] * len(targets)
@@ -157,7 +166,7 @@ def _probe_all(targets: Sequence[Target], timeout: float, prober: Prober) -> lis
     def run(i: int, target: Target) -> None:
         t0 = time.monotonic()
         try:
-            identity = prober(target.spec, timeout)
+            identity = prober(target.spec, timeouts[i])
         except BaseException as exc:
             outcome, detail = _classify(exc)
             results[i] = _candidate(target, outcome, time.monotonic() - t0, detail=detail)
@@ -172,8 +181,9 @@ def _probe_all(targets: Sequence[Target], timeout: float, prober: Prober) -> lis
     ]
     for th in threads:
         th.start()
-    # Heartbeat wait + identify + close, plus slack for slow opens.
-    deadline = started + timeout + 4.0
+    # Heartbeat wait + identify (with retries on network links) + close, plus slack.
+    slack = 1.5 * (NETWORK_IDENTIFY_RETRIES + 1) + 2.0
+    deadline = started + max(timeouts, default=0.0) + slack
     for th in threads:
         th.join(max(0.0, deadline - time.monotonic()))
     return [
@@ -189,12 +199,31 @@ def _probe_all(targets: Sequence[Target], timeout: float, prober: Prober) -> lis
     ]
 
 
+_LOCAL_NETWORK_HINT = (
+    "; if a WiFi bridge is up, check System Settings > Privacy & Security > "
+    "Local Network allows Python (macOS silently drops its local traffic otherwise)"
+)
+
+
+def _hint_local_network(candidates: list[LinkCandidate], platform: str) -> list[LinkCandidate]:
+    """On macOS, a UDP listen that hears nothing may be the Local Network privacy block."""
+    if platform != "darwin":
+        return candidates
+    return [
+        c.model_copy(update={"detail": f"{c.detail}{_LOCAL_NETWORK_HINT}"})
+        if c.source == "udp" and c.outcome is ProbeOutcome.NO_HEARTBEAT
+        else c
+        for c in candidates
+    ]
+
+
 def discover(
     *,
     also: Sequence[str] = (),
     udp_port: int | None = DEFAULT_UDP_PORT,
     serial: bool = True,
     timeout: float = DEFAULT_PROBE_TIMEOUT,
+    network_timeout: float = DEFAULT_NETWORK_TIMEOUT,
     ports: Iterable[PortInfo] | None = None,
     prober: Prober = probe_link,
     platform: str = sys.platform,
@@ -214,6 +243,14 @@ def discover(
     targets += [t for t in extra if str(t.spec) not in seen]
     return DiscoveryResult(
         probe_timeout=timeout,
-        candidates=_probe_all(targets, timeout, prober),
+        network_timeout=network_timeout,
+        candidates=_hint_local_network(
+            _probe_all(
+                targets,
+                [timeout if t.spec.is_serial else network_timeout for t in targets],
+                prober,
+            ),
+            platform,
+        ),
         skipped=skipped,
     )

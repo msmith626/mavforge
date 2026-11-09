@@ -130,12 +130,13 @@ def identify(
     systems_seen: set[int],
     *,
     request_timeout: float,
+    retries: int = 1,
 ) -> VehicleIdentity:
     sysid, compid = heartbeat.get_srcSystem(), heartbeat.get_srcComponent()
     wanted = [mavlink.MAVLINK_MSG_ID_AUTOPILOT_VERSION]
     if adapter.simulation_probe_message is not None:
         wanted.append(adapter.simulation_probe_message)
-    got = request_messages(conn, sysid, compid, wanted, timeout=request_timeout)
+    got = request_messages(conn, sysid, compid, wanted, timeout=request_timeout, retries=retries)
 
     version = got[mavlink.MAVLINK_MSG_ID_AUTOPILOT_VERSION]
     fields: dict[str, object] = {}

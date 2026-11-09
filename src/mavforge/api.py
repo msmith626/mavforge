@@ -317,10 +317,17 @@ def discover(
     udp_port: int | None = discovery_service.DEFAULT_UDP_PORT,
     serial: bool = True,
     timeout: float = discovery_service.DEFAULT_PROBE_TIMEOUT,
+    network_timeout: float = discovery_service.DEFAULT_NETWORK_TIMEOUT,
 ) -> DiscoveryResult:
     """Find vehicles: probe serial ports, a UDP listen port and any ``also`` endpoints
     for an autopilot heartbeat. See ``mavforge.services.discovery`` for caveats."""
-    return discovery_service.discover(also=also, udp_port=udp_port, serial=serial, timeout=timeout)
+    return discovery_service.discover(
+        also=also,
+        udp_port=udp_port,
+        serial=serial,
+        timeout=timeout,
+        network_timeout=network_timeout,
+    )
 
 
 def capabilities(policy: Policy | None = None) -> CapabilitiesResult:

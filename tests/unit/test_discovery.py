@@ -93,7 +93,7 @@ def test_hung_open_is_reported_not_waited_on() -> None:
         timeout=0.5,
         platform="linux",
     )
-    assert time.monotonic() - t0 < 10
+    assert time.monotonic() - t0 < 15
     assert result.candidates[0].outcome is ProbeOutcome.OPEN_TIMEOUT
 
 
@@ -101,3 +101,41 @@ def test_duplicate_operator_endpoint_is_probed_once() -> None:
     result = discover(also=["udpin:0.0.0.0:14550"], serial=False, prober=lambda s, t: IDENTITY)
     assert len(result.candidates) == 1
     assert result.candidates[0].source == "udp"
+
+
+def test_network_links_get_the_longer_timeout() -> None:
+    waits: dict[str, float] = {}
+
+    def prober(spec: ConnectionSpec, timeout: float) -> VehicleIdentity:
+        waits[spec.kind.value] = timeout
+        return IDENTITY
+
+    discover(
+        ports=[PortInfo("/dev/ttyACM0")],
+        prober=prober,
+        timeout=3.0,
+        network_timeout=9.0,
+        platform="linux",
+    )
+    assert waits == {"serial": 3.0, "udpin": 9.0}
+
+
+def _silent(spec: ConnectionSpec, timeout: float) -> VehicleIdentity:
+    raise NoVehicleError("No heartbeat")
+
+
+def test_macos_udp_silence_mentions_local_network_permission() -> None:
+    mac = discover(serial=False, prober=_silent, platform="darwin")
+    linux = discover(serial=False, prober=_silent, platform="linux")
+    assert "Local Network" in (mac.candidates[0].detail or "")
+    assert "Local Network" not in (linux.candidates[0].detail or "")
+
+
+def test_no_route_to_host_hint_on_macos_only() -> None:
+    from mavforge.transport.connection import open_failure_hint
+    from mavforge.transport.connstr import parse_connection_string
+
+    spec = parse_connection_string("tcp:192.168.1.1:5760")
+    exc = OSError("[Errno 65] No route to host")
+    assert "Local Network" in open_failure_hint(spec, exc, platform="darwin")
+    assert open_failure_hint(spec, exc, platform="linux") == ""
