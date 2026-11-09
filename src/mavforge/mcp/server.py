@@ -277,9 +277,18 @@ class VehicleProvider:
             if self._vehicle is None:
                 try:
                     vehicle = self._connect(self._options)
-                except ConnectionFailedError:
-                    if self._discovery is None or self._approved_uid is None:
+                except ConnectionFailedError as exc:
+                    if self._discovery is None:
                         raise
+                    if self._approved_uid is None:
+                        # No board approved yet (e.g. the server just started with USB
+                        # unplugged): nothing may be switched to silently, so point the
+                        # agent at the human-choice path instead of a dead end.
+                        raise type(exc)(
+                            f"{exc.message}. Call vehicle_discover, then vehicle_connect so "
+                            "the user can choose another link.",
+                            details=exc.details,
+                        ) from exc
                     vehicle = self._same_board_elsewhere()
                 self._vehicle = self._accept(vehicle)
             return self._vehicle

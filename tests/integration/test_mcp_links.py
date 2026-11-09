@@ -243,3 +243,17 @@ def test_reconnect_tries_a_link_whose_probe_lost_the_uid(make_fake: FakeFactory)
     later = run(provider, steps)
     assert not later.is_error, later.content
     assert later.structured_content["link"]["connection"] == wifi.connection_string
+
+
+def test_first_connect_failure_points_at_discovery(make_fake: FakeFactory) -> None:
+    """Started with a link that is already gone (USB unplugged) and no board approved yet:
+    no silent switch, but the error says how the user can choose another link."""
+    gone, wifi = make_fake(), make_fake()
+    gone.stop()
+
+    async def steps(client: Client) -> Any:
+        return await client.call_tool("vehicle_info", {})
+
+    err = error(run(provider_for(gone.connection_string, wifi.connection_string), steps))
+    assert "vehicle_discover" in err["message"]
+    assert wifi.received == []  # nothing else was probed or connected to
