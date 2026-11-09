@@ -102,6 +102,50 @@ class VehicleIdentity(_Model):
     )
 
 
+class ProbeOutcome(StrEnum):
+    VEHICLE = "vehicle"
+    """An autopilot heartbeat was heard and the vehicle was identified."""
+    NO_HEARTBEAT = "no_heartbeat"
+    """The link opened but no autopilot heartbeat arrived within the probe timeout."""
+    BUSY = "busy"
+    """Another program holds the device or port (a GCS, another MAVForge process...)."""
+    OPEN_TIMEOUT = "open_timeout"
+    """Opening the link did not finish within the probe timeout (common for Bluetooth)."""
+    ERROR = "error"
+    """The link could not be opened for another reason; see ``detail``."""
+
+
+class LinkCandidate(_Model):
+    """One link MAVForge found and probed. Port metadata comes from the OS / USB
+    descriptors and is untrusted text, like any other device-originated string."""
+
+    connection: str = Field(description="Validated connection string for this link.")
+    source: Literal["serial", "udp", "operator"] = Field(
+        description="serial = enumerated serial port, udp = UDP listen, "
+        "operator = endpoint given explicitly with --also."
+    )
+    outcome: ProbeOutcome
+    detail: str | None = None
+    description: str | None = Field(default=None, description="OS port description.")
+    manufacturer: str | None = None
+    usb_vid: int | None = None
+    usb_pid: int | None = None
+    usb_serial: str | None = None
+    vehicle: VehicleIdentity | None = None
+    probe_seconds: float
+
+
+class DiscoveryResult(_Model):
+    status: OperationStatus = OperationStatus.SUCCEEDED
+    probe_timeout: float
+    candidates: list[LinkCandidate]
+    skipped: list[str] = Field(
+        default_factory=list,
+        description="Serial ports not probed, with the reason (known non-vehicle ports, "
+        "or device names MAVForge will not open).",
+    )
+
+
 class LinkStats(_Model):
     connection: str = Field(description="Connection string with any credentials redacted.")
     messages_received: int

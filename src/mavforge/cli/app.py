@@ -38,6 +38,7 @@ from mavforge.domain.models import (
     ChangeOutcome,
     ChangePlan,
     DiagnosticReport,
+    DiscoveryResult,
     FindingKind,
     InfoResult,
     ParamDiffResult,
@@ -54,6 +55,7 @@ from mavforge.domain.outcomes import OperationStatus, exit_code_for
 from mavforge.domain.values import format_value
 from mavforge.policy.permissions import Policy
 from mavforge.services.calibration.operations import procedures as calibration_procedures
+from mavforge.services.discovery import DEFAULT_PROBE_TIMEOUT, DEFAULT_UDP_PORT
 from mavforge.transport.connection import DEFAULT_SOURCE_COMPONENT, DEFAULT_SOURCE_SYSTEM
 
 EXIT_CODES_HELP = (
@@ -647,6 +649,78 @@ def info(ctx: typer.Context) -> None:
 def status(ctx: typer.Context) -> None:
     """Show arming state, mode, sensor health, pre-arm flag, battery, GPS and messages."""
     _with_vehicle(ctx, lambda v: v.status(), render_status)
+
+
+def render_discovery(r: DiscoveryResult) -> None:
+    table = Table(title=f"Links probed ({r.probe_timeout:g}s heartbeat wait)")
+    for col in ("Connection", "Result", "Vehicle", "Board uid", "Port"):
+        table.add_column(col)
+    for c in r.candidates:
+        vehicle = ""
+        if (v := c.vehicle) is not None:
+            fw = f" {v.firmware}" if v.firmware else ""
+            sim = " (SITL)" if v.simulated else ""
+            vehicle = f"sysid {v.system_id} {v.vehicle_family or v.mav_type}{fw}{sim}"
+        port = " ".join(
+            part
+            for part in (
+                f"{c.usb_vid:04x}:{c.usb_pid:04x}" if c.usb_vid is not None else None,
+                f"sn {c.usb_serial}" if c.usb_serial else None,
+                c.description,
+            )
+            if part
+        )
+        style = {"vehicle": "green", "busy": "yellow"}.get(c.outcome.value, "dim")
+        table.add_row(
+            safe(c.connection),
+            Text(c.outcome.value, style=style),
+            safe(vehicle),
+            safe((c.vehicle.uid or "(none)") if c.vehicle else ""),
+            safe(port),
+        )
+    out.print(table)
+    for c in r.candidates:
+        if c.detail and c.outcome.value not in ("vehicle", "no_heartbeat"):
+            out.print(safe(f"  {c.connection}: {c.detail}"), style="dim")
+    for s in r.skipped:
+        out.print(safe(f"  skipped {s}"), style="dim")
+    found = sum(c.vehicle is not None for c in r.candidates)
+    out.print(f"{found} vehicle link(s) found.")
+
+
+@app.command()
+def discover(
+    ctx: typer.Context,
+    also: Annotated[
+        list[str] | None,
+        typer.Option("--also", help="Extra connection string to probe (repeatable)."),
+    ] = None,
+    udp_port: Annotated[
+        int, typer.Option(min=1, max=65535, help="UDP port to listen on for WiFi bridges.")
+    ] = DEFAULT_UDP_PORT,
+    no_udp: Annotated[bool, typer.Option("--no-udp", help="Do not listen on UDP.")] = False,
+    no_serial: Annotated[
+        bool, typer.Option("--no-serial", help="Do not probe serial ports.")
+    ] = False,
+    probe_timeout: Annotated[
+        float, typer.Option(min=0.5, help="Seconds to wait for a heartbeat on each link.")
+    ] = DEFAULT_PROBE_TIMEOUT,
+) -> None:
+    """Find vehicles: probe serial ports, a UDP port and any --also links (no -c needed).
+
+    Close ground stations and other MAVForge processes first: probing a port another
+    program has open can briefly disrupt it.
+    """
+    _offline(
+        ctx,
+        lambda: mavforge.discover(
+            also=also or [],
+            udp_port=None if no_udp else udp_port,
+            serial=not no_serial,
+            timeout=probe_timeout,
+        ),
+        render_discovery,
+    )
 
 
 @app.command()

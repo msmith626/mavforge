@@ -14,7 +14,7 @@ The CLI and MCP server are thin layers over this same API.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import TracebackType
 from typing import Self
@@ -31,6 +31,7 @@ from mavforge.domain.models import (
     CapabilitiesResult,
     ChangePlan,
     DiagnosticReport,
+    DiscoveryResult,
     InfoResult,
     ParamBackup,
     ParamDiffResult,
@@ -47,6 +48,7 @@ from mavforge.services import backup as backup_service
 from mavforge.services import changes as changes_service
 from mavforge.services import diagnostics as diagnostics_service
 from mavforge.services import diff as diff_service
+from mavforge.services import discovery as discovery_service
 from mavforge.services import info as info_service
 from mavforge.services import params as params_service
 from mavforge.services import plan_store
@@ -307,6 +309,18 @@ def connect(
         heartbeat_timeout=timeout,
     )
     return Vehicle(open_session(options, policy=policy, audit=audit, interface=interface))
+
+
+def discover(
+    *,
+    also: Sequence[str] = (),
+    udp_port: int | None = discovery_service.DEFAULT_UDP_PORT,
+    serial: bool = True,
+    timeout: float = discovery_service.DEFAULT_PROBE_TIMEOUT,
+) -> DiscoveryResult:
+    """Find vehicles: probe serial ports, a UDP listen port and any ``also`` endpoints
+    for an autopilot heartbeat. See ``mavforge.services.discovery`` for caveats."""
+    return discovery_service.discover(also=also, udp_port=udp_port, serial=serial, timeout=timeout)
 
 
 def capabilities(policy: Policy | None = None) -> CapabilitiesResult:
