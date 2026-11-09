@@ -285,14 +285,21 @@ accordingly, not treated as blockers:
     at startup or picked by the human, via elicitation, from server-discovered
     candidates; no tool accepts a connection string."
   - **First step: done (2026-11-08).** `mavforge discover` (findings above).
-  - **MCP tools: built (2026-11-08), not yet tried in a real client.**
+  - **MCP tools: built and verified on hardware (2026-11-08).**
     `mavforge-mcp --discover` adds `vehicle_discover` and `vehicle_connect` (choice by
     elicitation, from a stored discovery so the question is identical on every
-    protocol round) and uid-bound auto-reconnect in `VehicleProvider`, all covered with
-    fake vehicles (`tests/integration/test_mcp_links.py`). Still to do: run it in
-    Claude Code against the real plane (USB <-> WiFi), and decide whether
-    `--discover` should become the default. Not done: a terminal fallback for
-    clients without elicitation (they get the candidate list and must restart).
+    protocol round) and uid-bound auto-reconnect in `VehicleProvider`
+    (`tests/integration/test_mcp_links.py`). In Claude Code against the real plane:
+    pick-list USB -> WiFi and WiFi -> USB, then USB unplugged -> silent switch to WiFi
+    on the very next call, all audited as `link_selected` with the same uid. Hardware
+    fixes along the way: reconnect also tries links whose probe lost the uid, and a
+    failed first connect points at `vehicle_discover`.
+  - **Open:** the approved uid is in memory only, so after a server restart with USB
+    unplugged the user must pick again; persisting it would trade that for trusting
+    the previous session's board without asking (undecided). No automatic upgrade back
+    to USB when it is plugged in while on WiFi (switching happens only on link loss).
+    No terminal fallback for clients without elicitation. Decide whether `--discover`
+    should become the default.
 
 ### Diagnostics (0, remaining)
 - **Findings that propose a parameter plan: done.** Built for M8b
