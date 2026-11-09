@@ -60,7 +60,6 @@ from mavforge.services.calibration.orientation import OrientationWorkflow
 from mavforge.services.calibration.radio import RadioWorkflow
 from mavforge.services.diagnostics import DEFAULT_PREARM_WAIT
 from mavforge.services.session import (
-    HEARTBEAT_TIMEOUT,
     ConnectOptions,
     Session,
     open_session,
@@ -291,12 +290,15 @@ def connect(
     target_system: int | None = None,
     source_system: int = DEFAULT_SOURCE_SYSTEM,
     source_component: int = DEFAULT_SOURCE_COMPONENT,
-    timeout: float = HEARTBEAT_TIMEOUT,
+    timeout: float | None = None,
     policy: Policy | None = None,
     audit: AuditLog | None = None,
     interface: str = "api",
 ) -> Vehicle:
     """Connect, wait for a vehicle heartbeat, and identify the vehicle.
+
+    ``timeout`` is the heartbeat wait; None uses the link default (5 s serial, 10 s
+    UDP/TCP, where AUTOPILOT_VERSION is also re-requested more often).
 
     ``policy`` defaults to read-only. ``audit`` defaults to the per-user audit log
     (``$MAVFORGE_STATE_DIR`` or ``$XDG_STATE_HOME/mavforge/audit.jsonl``).

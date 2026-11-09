@@ -28,16 +28,18 @@ from typing import Literal
 from mavforge.domain.errors import ConnectionFailedError, MAVForgeError, NoVehicleError
 from mavforge.domain.models import DiscoveryResult, LinkCandidate, ProbeOutcome, VehicleIdentity
 from mavforge.platforms.base import select_adapter
-from mavforge.services.session import identify, wait_for_vehicle
+from mavforge.services.session import (
+    NETWORK_HEARTBEAT_TIMEOUT,
+    NETWORK_IDENTIFY_RETRIES,
+    identify,
+    link_defaults,
+    wait_for_vehicle,
+)
 from mavforge.transport.connection import MavlinkConnection
 from mavforge.transport.connstr import ConnectionSpec, parse_connection_string
 
 DEFAULT_PROBE_TIMEOUT = 4.0
-DEFAULT_NETWORK_TIMEOUT = 10.0
-"""WiFi bridges are lossy: on real hardware (2026-11-08) a SpeedyBee F405 WING over a
-WiFi bridge averaged ~47 msg/s but went silent for up to 5.1 s, so a serial-length wait
-regularly missed the vehicle or its AUTOPILOT_VERSION reply."""
-NETWORK_IDENTIFY_RETRIES = 4
+DEFAULT_NETWORK_TIMEOUT = NETWORK_HEARTBEAT_TIMEOUT
 DEFAULT_UDP_PORT = 14550
 
 # macOS ports that are always present and never a flight controller.
@@ -113,7 +115,7 @@ def probe_link(spec: ConnectionSpec, timeout: float) -> VehicleIdentity:
     try:
         heartbeat, seen = wait_for_vehicle(conn, None, timeout)
         adapter = select_adapter(heartbeat)
-        retries = 1 if spec.is_serial else NETWORK_IDENTIFY_RETRIES
+        _, retries = link_defaults(spec)
         return identify(conn, heartbeat, adapter, seen, request_timeout=1.5, retries=retries)
     finally:
         conn.close()

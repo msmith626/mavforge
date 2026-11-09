@@ -565,7 +565,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="Vehicle link (same syntax as the mavforge CLI); default $MAVFORGE_CONNECTION.",
     )
     parser.add_argument("-t", "--target-system", type=int, default=None)
-    parser.add_argument("--timeout", type=float, default=5.0, help="Heartbeat wait (seconds).")
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="Heartbeat wait in seconds (default: 5 for serial, 10 for UDP/TCP links).",
+    )
     parser.add_argument(
         "--allow-configure",
         action="store_true",

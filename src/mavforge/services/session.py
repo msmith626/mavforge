@@ -16,10 +16,19 @@ from mavforge.transport.connection import (
     DEFAULT_SOURCE_SYSTEM,
     MavlinkConnection,
 )
-from mavforge.transport.connstr import parse_connection_string
+from mavforge.transport.connstr import ConnectionSpec, parse_connection_string
 from mavforge.transport.dialect import Message, enum_name, mavlink
 
 HEARTBEAT_TIMEOUT = 5.0
+"""Default heartbeat wait on serial links."""
+NETWORK_HEARTBEAT_TIMEOUT = 10.0
+"""Default heartbeat wait on UDP/TCP links. WiFi bridges are lossy: on real hardware
+(2026-11-08) a SpeedyBee F405 WING's WiFi averaged ~47 msg/s but went silent for up to
+5.1 s, so a 5 s wait regularly reported no vehicle."""
+SERIAL_IDENTIFY_RETRIES = 1
+NETWORK_IDENTIFY_RETRIES = 4
+"""AUTOPILOT_VERSION re-requests on network links. Without them a lossy link often
+yields no board ``uid``, which weakens the same-vehicle check in ``apply_plan``."""
 
 
 @dataclass(frozen=True)
@@ -28,8 +37,18 @@ class ConnectOptions:
     target_system: int | None = None
     source_system: int = DEFAULT_SOURCE_SYSTEM
     source_component: int = DEFAULT_SOURCE_COMPONENT
-    heartbeat_timeout: float = HEARTBEAT_TIMEOUT
+    heartbeat_timeout: float | None = None
+    """None picks the link default: HEARTBEAT_TIMEOUT (serial) or NETWORK_HEARTBEAT_TIMEOUT."""
     request_timeout: float = 1.5
+    identify_retries: int | None = None
+    """None picks the link default: SERIAL_IDENTIFY_RETRIES or NETWORK_IDENTIFY_RETRIES."""
+
+
+def link_defaults(spec: ConnectionSpec) -> tuple[float, int]:
+    """(heartbeat timeout, identify retries) suited to this kind of link."""
+    if spec.is_serial:
+        return HEARTBEAT_TIMEOUT, SERIAL_IDENTIFY_RETRIES
+    return NETWORK_HEARTBEAT_TIMEOUT, NETWORK_IDENTIFY_RETRIES
 
 
 @dataclass
@@ -136,7 +155,15 @@ def identify(
     wanted = [mavlink.MAVLINK_MSG_ID_AUTOPILOT_VERSION]
     if adapter.simulation_probe_message is not None:
         wanted.append(adapter.simulation_probe_message)
-    got = request_messages(conn, sysid, compid, wanted, timeout=request_timeout, retries=retries)
+    # Every request is retried once. Only AUTOPILOT_VERSION gets the extra retries: the
+    # simulation probe is never answered by real hardware, so retrying it would just add
+    # seconds to every real-vehicle connect.
+    got = request_messages(conn, sysid, compid, wanted, timeout=request_timeout, retries=1)
+    av = mavlink.MAVLINK_MSG_ID_AUTOPILOT_VERSION
+    if got[av] is None and retries > 1:
+        got[av] = request_messages(
+            conn, sysid, compid, [av], timeout=request_timeout, retries=retries - 2
+        )[av]
 
     version = got[mavlink.MAVLINK_MSG_ID_AUTOPILOT_VERSION]
     fields: dict[str, object] = {}
@@ -192,9 +219,23 @@ def open_session(
         spec, source_system=options.source_system, source_component=options.source_component
     )
     try:
-        heartbeat, seen = wait_for_vehicle(conn, options.target_system, options.heartbeat_timeout)
+        default_timeout, default_retries = link_defaults(spec)
+        heartbeat, seen = wait_for_vehicle(
+            conn,
+            options.target_system,
+            default_timeout if options.heartbeat_timeout is None else options.heartbeat_timeout,
+        )
         adapter = select_adapter(heartbeat)
-        identity = identify(conn, heartbeat, adapter, seen, request_timeout=options.request_timeout)
+        identity = identify(
+            conn,
+            heartbeat,
+            adapter,
+            seen,
+            request_timeout=options.request_timeout,
+            retries=default_retries
+            if options.identify_retries is None
+            else options.identify_retries,
+        )
     except BaseException:
         conn.close()
         raise

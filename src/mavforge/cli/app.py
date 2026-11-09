@@ -105,7 +105,7 @@ class GlobalOptions:
     target_system: int | None
     source_system: int
     source_component: int
-    timeout: float
+    timeout: float | None
     json: bool
 
 
@@ -135,8 +135,13 @@ def _global_options(
         int, typer.Option(min=0, max=255, help="MAVLink component ID MAVForge sends as.")
     ] = DEFAULT_SOURCE_COMPONENT,
     timeout: Annotated[
-        float, typer.Option(min=0.1, help="Seconds to wait for a vehicle heartbeat.")
-    ] = 5.0,
+        float | None,
+        typer.Option(
+            min=0.1,
+            help="Seconds to wait for a vehicle heartbeat "
+            "[default: 5 for serial, 10 for UDP/TCP links].",
+        ),
+    ] = None,
     json_output: Annotated[
         bool, typer.Option("--json", help="Print machine-readable JSON on stdout.")
     ] = False,
